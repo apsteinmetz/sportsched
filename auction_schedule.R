@@ -57,12 +57,6 @@ plane_travel_time <- 5
 plane_use_threshold <- 5 # hours by bus to trigger plane use
 
 
-# Create the set of schools with IDs
-schools <- tibble(
-  school_id = 1:n_schools,
-  school_name = paste0("School_", LETTERS[1:n_schools])
-)
-
 cat(
   "Created",
   n_schools,
@@ -76,9 +70,14 @@ cat(
 )
 
 # =============================================================================
-# SECTION 2: STRENGTH AND STRENGTH BANDS
+# SECTION 2: CREATE SCHOOLS AND DEFINE MATCH VARIABLES
 # =============================================================================
 
+# Create the set of schools with IDs
+schools <- tibble(
+  school_id = 1:n_schools,
+  school_name = paste0("School_", LETTERS[1:n_schools])
+)
 # Assign random strength scores (1, 2, or 3) to each school
 # 1 = weak, 2 = moderate, 3 = strong
 schools <- schools |>
@@ -87,44 +86,6 @@ schools <- schools |>
     strength = sample(1:3, n_schools, replace = TRUE)
   ) |>
   arrange(desc(strength))
-
-# Function to calculate match strength between two schools
-# Schools prefer evenly matched opponents (same strength score)
-# Numeric code: 3 = equal match (diff = 0), 2 = close match (diff = 1), 1 = mismatched (diff = 2)
-calculate_strength_match <- function(strength_i, strength_j) {
-  diff <- abs(strength_i - strength_j)
-  case_when(
-    diff == 0 ~ 3L, # Equal match (same strength)
-    diff == 1 ~ 2L, # Close match
-    diff == 2 ~ 1L # Mismatched
-  )
-}
-
-# Create all ordered pairs of schools for band calculation
-school_pairs <- expand_grid(
-  school_i = schools$school_id,
-  school_j = schools$school_id
-) |>
-  filter(school_i != school_j) |>
-  left_join(
-    schools |> select(school_id, strength_i = strength),
-    by = c("school_i" = "school_id")
-  ) |>
-  left_join(
-    schools |> select(school_id, strength_j = strength),
-    by = c("school_j" = "school_id")
-  ) |>
-  mutate(
-    # compute numeric code first then convert to an ordered factor
-    .strength_match_code = calculate_strength_match(strength_i, strength_j),
-    strength_match = factor(
-      .strength_match_code,
-      levels = c(1L, 2L, 3L),
-      labels = c("mismatched", "close match", "equal match"),
-      ordered = TRUE
-    )
-  ) |>
-  select(-.strength_match_code)
 
 # Visualize the distribution of school strengths
 ggplot(schools, aes(x = reorder(school_name, strength), y = strength)) +
@@ -150,22 +111,6 @@ schools |>
     )
   ) |>
   print()
-
-cat("\nMatch strength distribution:\n")
-school_pairs |>
-  count(strength_match) |>
-  mutate(
-    band_description = case_when(
-      strength_match == "mismatched" ~ "Mismatched (diff = 2)",
-      strength_match == "close match" ~ "Close (diff = 1)",
-      strength_match == "equal match" ~ "Evenly matched (diff = 0)"
-    )
-  ) |>
-  print()
-
-# =============================================================================
-# SECTION 3: TRAVEL TECHNOLOGY
-# =============================================================================
 
 # Generate geographic locations for schools (using random coordinates)
 # Coordinates represent approximate positions on a map (e.g., US colleges)
@@ -201,14 +146,105 @@ schools |>
   select(school_name, strength, lat, lon) |>
   print()
 
+# =============================================================================
+# SECTION 3:  CREATE SCHOOL PAIRS WITH TRAVEL INFORMATION
+# =============================================================================
+# Function to calculate match strength between two schools
+# Schools prefer evenly matched opponents (same strength score)
+# Numeric code: 3 = equal match (diff = 0), 2 = close match (diff = 1), 1 = mismatched (diff = 2)
+calculate_strength_match <- function(strength_i, strength_j) {
+  diff <- abs(strength_i - strength_j)
+  case_when(
+    diff == 0 ~ 3L, # Equal match (same strength)
+    diff == 1 ~ 2L, # Close match
+    diff == 2 ~ 1L # Mismatched
+  )
+}
+
+# Create all ordered pairs of schools for band calculation
+school_pairs <- expand_grid(
+  school_i = schools$school_id,
+  school_j = schools$school_id
+  # lat_i = schools$lat,
+  # lon_i = schools$lon,
+  # lat_j = schools$lat,
+  # lon_j = schools$lon
+) |>
+  filter(school_i != school_j) |>
+  left_join(
+    schools |> select(school_id, strength_i = strength),
+    by = c("school_i" = "school_id")
+  ) |>
+  left_join(
+    schools |> select(school_id, strength_j = strength),
+    by = c("school_j" = "school_id")
+  ) |>
+  mutate(
+    # compute numeric code first then convert to an ordered factor
+    .strength_match_code = calculate_strength_match(strength_i, strength_j),
+    strength_match = factor(
+      .strength_match_code,
+      levels = c(1L, 2L, 3L),
+      labels = c("mismatched", "close match", "equal match"),
+      ordered = TRUE
+    )
+  ) |>
+  select(-.strength_match_code)
+
+
+cat("\nMatch strength distribution:\n")
+school_pairs |>
+  count(strength_match) |>
+  mutate(
+    band_description = case_when(
+      strength_match == "mismatched" ~ "Mismatched (diff = 2)",
+      strength_match == "close match" ~ "Close (diff = 1)",
+      strength_match == "equal match" ~ "Evenly matched (diff = 0)"
+    )
+  ) |>
+  print()
+
+# Haversine distance (vectorized) — returns distance in miles
+haversine_distance_miles <- function(lat1, lon1, lat2, lon2) {
+  # Inputs: numeric vectors (degrees). Recycled to common length.
+  # Output: numeric vector of distances in miles.
+  rad <- pi / 180
+  n <- max(length(lat1), length(lon1), length(lat2), length(lon2))
+  lat1 <- rep(lat1, length.out = n)
+  lon1 <- rep(lon1, length.out = n)
+  lat2 <- rep(lat2, length.out = n)
+  lon2 <- rep(lon2, length.out = n)
+  dlat <- (lat2 - lat1) * rad
+  dlon <- (lon2 - lon1) * rad
+  a <- sin(dlat / 2)^2 + cos(lat1 * rad) * cos(lat2 * rad) * sin(dlon / 2)^2
+  c <- 2 * atan2(sqrt(a), sqrt(pmax(0, 1 - a)))
+  earth_radius_miles <- 3958.8
+  earth_radius_miles * c
+}
+
+school_pairs <- school_pairs |>
+  # add distance between schools
+  left_join(
+    schools |> select(school_id, lat, lon),
+    by = c("school_i" = "school_id")
+  ) |>
+  rename(lat_i = lat, lon_i = lon) |>
+  left_join(
+    schools |> select(school_id, lat, lon),
+    by = c("school_j" = "school_id")
+  ) |>
+  rename(lat_j = lat, lon_j = lon) |>
+  mutate(
+    distance_miles = haversine_distance_miles(lat_i, lon_i, lat_j, lon_j)
+  )
+
+
 # Function to calculate bus travel time (in hours) based on distance
 # Plane travel time is constant (defined above)
-calculate_bus_travel_time <- function(lat_i, lon_i, lat_j, lon_j) {
+calculate_bus_travel_time <- function(distance_miles) {
+  avg_speed_mph <- 60 # Average bus speed
   # Calculate Euclidean distance (simplified)
-  distance <- sqrt((lat_i - lat_j)^2 + (lon_i - lon_j)^2)
-  # Convert to approximate travel time (scaling factor)
-  # Roughly 1 unit = 50 miles, average speed = 50 mph for bus consideration
-  travel_time <- distance * 0.5 # Results in 0-15 hour range
+  travel_time <- distance_miles / avg_speed_mph
   round(travel_time, 1)
 }
 
@@ -226,17 +262,9 @@ calculate_travel_cost <- function(travel_class) {
 
 # Add travel information to school pairs
 school_pairs <- school_pairs |>
-  left_join(
-    schools |> select(school_id, lat_i = lat, lon_i = lon),
-    by = c("school_i" = "school_id")
-  ) |>
-  left_join(
-    schools |> select(school_id, lat_j = lat, lon_j = lon),
-    by = c("school_j" = "school_id")
-  ) |>
   mutate(
     # Calculate bus travel time based on distance
-    bus_travel_time = calculate_bus_travel_time(lat_i, lon_i, lat_j, lon_j),
+    bus_travel_time = calculate_bus_travel_time(distance_miles),
     # Travel class: B = Bus (<=5 hours by bus), P = Plane (>5 hours by bus)
     travel_class = if_else(bus_travel_time <= 5, "B", "P"),
     # Actual travel time: bus time for bus trips, constant for plane trips
