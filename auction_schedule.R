@@ -2,7 +2,7 @@
 # Schedule Formation Model: Auction-Based Collegiate Athletic Conference Scheduling
 # Version: 0.1.0
 # Author: Art Steinmetz
-# Created: 2025-02-01
+# Created: 2026-02-01
 # =============================================================================
 #
 # This script implements an iterative auction-based model to create a seasonal
@@ -19,7 +19,7 @@ library(ggplot2)
 library(lpSolve)
 
 # Set seed for reproducibility
-set.seed(42)
+# set.seed(42)
 
 # =============================================================================
 # SECTION 1: AGENTS AND SEASON PARAMETERS
@@ -46,15 +46,17 @@ initial_budget <- 100
 home_travel_cost <- 0
 
 # Bus away game cost (flat rate)
-bus_travel_cost <- 1500
+bus_travel_cost <- 1500 # per trip per team
 
-# Plane away game cost (flat rate)
+# Plane away game cost (flat rate) per trip per team
 plane_travel_cost <- 7500
 
 # Plane travel time is constant (hours) regardless of distance
 plane_travel_time <- 5
 
 plane_use_threshold <- 5 # hours by bus to trigger plane use
+
+
 # Create the set of schools with IDs
 schools <- tibble(
   school_id = 1:n_schools,
@@ -94,7 +96,7 @@ calculate_strength_match <- function(strength_i, strength_j) {
   case_when(
     diff == 0 ~ 3L, # Equal match (same strength)
     diff == 1 ~ 2L, # Close match
-    diff == 2 ~ 1L  # Mismatched
+    diff == 2 ~ 1L # Mismatched
   )
 }
 
@@ -286,32 +288,37 @@ game_types <- expand_grid(
 ) |>
   mutate(
     game_type_id = row_number(),
-    type_label = paste0("Match_", as.character(strength_match), "_", travel_class)
+    type_label = paste0(
+      "Match_",
+      as.character(strength_match),
+      "_",
+      travel_class
+    )
   )
 
 cat("\nGame Types (k = strength_match, travel_class):\n")
 print(game_types)
 
-# Assign game type to each school pair
+# Assign game type to each school pair (join on factor strength_match)
 school_pairs <- school_pairs |>
   left_join(
     game_types,
-    by = c("strength_band", "travel_class")
+    by = c("strength_match", "travel_class")
   )
 
 # Visualize the distribution of game types
-ggplot(school_pairs, aes(x = type_label, fill = as.factor(strength_band))) +
+ggplot(school_pairs, aes(x = type_label, fill = strength_match)) +
   geom_bar() +
   scale_fill_brewer(
     palette = "Set2",
-    labels = c("1" = "Mismatched", "2" = "Moderate", "3" = "Evenly Matched")
+    labels = c("Mismatched", "Close Match", "Evenly Matched")
   ) +
   labs(
     title = "Distribution of Away Game Types",
-    subtitle = "By strength band and travel class",
+    subtitle = "By match strength and travel class",
     x = "Game Type",
     y = "Count",
-    fill = "Strength Band"
+    fill = "Match Strength"
   ) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
@@ -336,18 +343,18 @@ generate_school_preferences <- function(school_id, game_types) {
   # but this may not be true.  Some schools may have smaller budgets
   # have a strong preference for bus travel, be willing to take longer rides, etc.
   base_disutility <- tribble(
-    ~strength_band , ~travel_class , ~base_value ,
-                 1 , "B"           ,         -20 , # Mismatched, bus - LEAST preferred
-                 1 , "P"           ,         -30 , # Mismatched, plane - LEAST preferred
-                 2 , "B"           ,          -8 , # Close match, bus
-                 2 , "P"           ,         -15 , # Close match, plane
-                 3 , "B"           ,          -3 , # Evenly matched, bus - MOST preferred!
-                 3 , "P"           ,         -10 # Evenly matched, plane - preferred
+    ~strength_match , ~travel_class , ~base_value ,
+    "mismatched"    , "B"           ,         -20 , # Mismatched, bus - LEAST preferred
+    "mismatched"    , "P"           ,         -30 , # Mismatched, plane - LEAST preferred
+    "close match"   , "B"           ,          -8 , # Close match, bus
+    "close match"   , "P"           ,         -15 , # Close match, plane
+    "equal match"   , "B"           ,          -3 , # Equal match, bus - MOST preferred!
+    "equal match"   , "P"           ,         -10 # Equal match, plane - preferred
   )
 
   # Add random variation for this school
   school_prefs <- game_types |>
-    left_join(base_disutility, by = c("strength_band", "travel_class")) |>
+    left_join(base_disutility, by = c("strength_match", "travel_class")) |>
     mutate(
       school_id = school_id,
       # Add random variation (±3 tokens)
@@ -355,8 +362,8 @@ generate_school_preferences <- function(school_id, game_types) {
       # Each school is willing to accept more evenly matched games
       # Band 3 (evenly matched) is most desired
       max_quantity = case_when(
-        strength_band == 3 ~ sample(4:6, n(), replace = TRUE), # Prefer evenly matched
-        strength_band == 2 ~ sample(2:4, n(), replace = TRUE), # Accept close matches
+        strength_match == "equal match" ~ sample(4:6, n(), replace = TRUE), # Prefer equal matches
+        strength_match == "close match" ~ sample(2:4, n(), replace = TRUE), # Accept close matches
         TRUE ~ sample(0:2, n(), replace = TRUE) # Few mismatched
       )
     ) |>
@@ -1522,7 +1529,7 @@ schedule_by_type <- map_dfr(1:n_schools, function(i) {
         select(
           school_i,
           school_j,
-          strength_band,
+          strength_match,
           travel_class,
           game_type_id,
           type_label,
@@ -1538,7 +1545,7 @@ schedule_by_type <- map_dfr(1:n_schools, function(i) {
 
 cat("\n--- Schedule Composition by Game Type ---\n")
 type_summary <- schedule_by_type |>
-  group_by(type_label, strength_band, travel_class) |>
+  group_by(type_label, strength_match, travel_class) |>
   summarise(
     total_games = sum(games),
     avg_travel_time = round(mean(travel_time), 1),
@@ -1550,19 +1557,19 @@ print(type_summary)
 # Visualize game type distribution
 ggplot(
   type_summary,
-  aes(x = type_label, y = total_games, fill = as.factor(strength_band))
+  aes(x = type_label, y = total_games, fill = strength_match)
 ) +
   geom_col() +
   scale_fill_brewer(
     palette = "Set2",
-    labels = c("1" = "Mismatched", "2" = "Moderate", "3" = "Evenly Matched")
+    labels = c("Mismatched", "Close Match", "Evenly Matched")
   ) +
   labs(
     title = "Final Schedule: Games by Type",
-    subtitle = "Distribution of away games across strength bands and travel classes",
+    subtitle = "Distribution of away games across match strengths and travel classes",
     x = "Game Type",
     y = "Total Games",
-    fill = "Strength Band"
+    fill = "Match Strength"
   ) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
@@ -1659,14 +1666,14 @@ create_readable_schedule <- function(schedule, schools_df) {
     ) |>
     left_join(
       school_pairs |>
-        select(school_i, school_j, strength_band, travel_class, travel_time),
+        select(school_i, school_j, strength_match, travel_class, travel_time),
       by = c("away_id" = "school_i", "home_id" = "school_j")
     ) |>
     select(
       away_team,
       home_team,
       games,
-      strength_band,
+      strength_match,
       travel_class,
       travel_time
     ) |>
@@ -1689,9 +1696,9 @@ print(readable_schedule, n = 50)
 # Summary statistics
 cat("\n--- Summary Statistics ---\n")
 cat("Total unique matchups:", nrow(readable_schedule), "\n")
-cat("Games by strength band:\n")
+cat("Games by match strength:\n")
 readable_schedule |>
-  group_by(strength_band) |>
+  group_by(strength_match) |>
   summarise(games = sum(games)) |>
   print()
 
@@ -1741,7 +1748,7 @@ create_weekly_schedule <- function(schedule, schools_df, school_pairs_df) {
               travel_class = pair_info$travel_class,
               travel_time = pair_info$travel_time,
               distance_miles = distance_miles,
-              strength_band = pair_info$strength_band
+              strength_match = pair_info$strength_match
             )
           )
 
@@ -1755,7 +1762,7 @@ create_weekly_schedule <- function(schedule, schools_df, school_pairs_df) {
               travel_class = "home",
               travel_time = 0,
               distance_miles = 0,
-              strength_band = pair_info$strength_band
+              strength_match = pair_info$strength_match
             )
           )
         }
