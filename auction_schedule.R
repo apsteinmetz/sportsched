@@ -1488,7 +1488,8 @@ plot_school_schedule_map <- function(
     # Plot base school (larger, size by strength + bonus)
     geom_point(
       data = base_school,
-      aes(x = lon, y = lat, size = strength + 3),
+      aes(x = lon, y = lat, size = strength),
+      # aes(x = lon, y = lat, size = strength + 3),
       shape = 21,
       fill = "gold",
       color = "black",
@@ -1530,7 +1531,7 @@ plot_school_schedule_map <- function(
         nrow(away_games),
         "away games (red arrows out) |",
         nrow(home_games),
-        "home games (green arrows in)"
+        "home games (green arrows in) | Air Travel (dashed lines) Bus Travel (solid lines)"
       ),
       x = "Longitude",
       y = "Latitude"
