@@ -14,7 +14,7 @@ Forming a collegiate athletic conference where an auction market is used to  cre
 Your task is to write an R language script that implements the auction model below and then simulate an auction to create a sports schedule  in a single sport for a universe of 20 schools.  Use the model specification below.
 
 # Output Preferences
-Liberally comment the code with explanations for each step.  Code using the Tidyverse vernacular with Dplyr verbs, not base R.  Visualize important observations using ggplot2 graphics.
+Liberally comment the code with explanations for each step.  Code using the Tidyverse vernacular with Dplyr verbs, not base R.  Visualize important observations using ggplot2 graphics.  Ask for clarification where instructions are ambiguous.
 
 # Specification of Iterative Auction-Based Schedule Formation Model
 
