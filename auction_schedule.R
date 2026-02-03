@@ -16,7 +16,12 @@
 # -----------------------------------------------------------------------------
 library(tidyverse)
 library(ggplot2)
+if (!require(denisonbrand)) {
+  remotes::install_github("apsteinmetz/denisonbrand")
+  library(denisonbrand)
+}
 library(lpSolve)
+denisonbrand::load_fonts()
 
 # Set seed for reproducibility
 # set.seed(42)
@@ -90,7 +95,7 @@ schools <- schools |>
 # Visualize the distribution of school strengths
 ggplot(schools, aes(x = reorder(school_name, strength), y = strength)) +
   geom_col(aes(fill = as.factor(strength))) +
-  scale_fill_brewer(palette = "Set2", name = "Strength") +
+  scale_fill_den(palette = "secondarydark", name = "Strength") +
   coord_flip() +
   labs(
     title = "School Strength Scores",
@@ -98,7 +103,7 @@ ggplot(schools, aes(x = reorder(school_name, strength), y = strength)) +
     x = "School",
     y = "Strength Score"
   ) +
-  theme_minimal()
+  theme_den()
 
 cat("\nStrength score distribution:\n")
 schools |>
@@ -125,7 +130,7 @@ schools <- schools |>
 ggplot(schools, aes(x = lon, y = lat)) +
   geom_point(aes(color = as.factor(strength), size = 3)) +
   geom_text(aes(label = school_name), hjust = -0.1, vjust = 0.5, size = 3) +
-  scale_color_brewer(palette = "Set2", name = "Strength") +
+  scale_color_den(palette = "secondarydark", name = "Strength") +
   guides(size = "none") +
   labs(
     title = "School Locations",
@@ -133,7 +138,7 @@ ggplot(schools, aes(x = lon, y = lat)) +
     x = "Longitude",
     y = "Latitude"
   ) +
-  theme_minimal() +
+  theme_den() +
   theme(
     panel.grid.major = element_line(color = "gray80"),
     panel.grid.minor = element_line(color = "gray90")
@@ -277,7 +282,10 @@ school_pairs <- school_pairs |>
 ggplot(school_pairs, aes(x = travel_time, fill = travel_class)) +
   geom_histogram(binwidth = 0.5, color = "white") +
   scale_fill_manual(
-    values = c("B" = "forestgreen", "P" = "steelblue"),
+    values = c(
+      "B" = den_cols("hillsidedarkgreen"),
+      "P" = den_cols("granvilledarkblue")
+    ),
     labels = c("B" = "Bus (≤5 hrs)", "P" = "Plane (>5 hrs)")
   ) +
   labs(
@@ -287,7 +295,7 @@ ggplot(school_pairs, aes(x = travel_time, fill = travel_class)) +
     y = "Count",
     fill = "Travel Class"
   ) +
-  theme_minimal()
+  theme_den()
 
 cat("\nTravel class distribution:\n")
 school_pairs |>
@@ -337,8 +345,8 @@ school_pairs <- school_pairs |>
 # Visualize the distribution of game types
 ggplot(school_pairs, aes(x = type_label, fill = strength_match)) +
   geom_bar() +
-  scale_fill_brewer(
-    palette = "Set2",
+  scale_fill_den(
+    palette = "secondarydark",
     labels = c("Mismatched", "Close Match", "Evenly Matched")
   ) +
   labs(
@@ -348,7 +356,7 @@ ggplot(school_pairs, aes(x = type_label, fill = strength_match)) +
     y = "Count",
     fill = "Match Strength"
   ) +
-  theme_minimal() +
+  theme_den() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 # =============================================================================
@@ -419,7 +427,7 @@ ggplot(
   aes(x = reorder(type_label, avg_disutility), y = avg_disutility)
 ) +
   geom_col(aes(fill = avg_disutility)) +
-  scale_fill_viridis_c(option = "magma", direction = -1) +
+  scale_fill_den(palette = "secondarydark", discrete = FALSE, reverse = TRUE) +
   coord_flip() +
   labs(
     title = "Average School Preferences by Game Type",
@@ -428,7 +436,7 @@ ggplot(
     y = "Average Disutility (tokens)",
     fill = "Disutility"
   ) +
-  theme_minimal()
+  theme_den()
 
 # =============================================================================
 # SECTION 6: INITIALIZE AUCTION STATE
@@ -1218,7 +1226,11 @@ ggplot(
   )
 ) +
   geom_col() +
-  scale_fill_viridis_c(option = "plasma", labels = scales::dollar_format()) +
+  scale_fill_den(
+    palette = "secondarydark",
+    discrete = FALSE,
+    labels = scales::dollar_format()
+  ) +
   coord_flip() +
   labs(
     title = "Total Travel Hours by School",
@@ -1227,7 +1239,7 @@ ggplot(
     y = "Total Travel Hours (Season)",
     fill = "Travel Cost"
   ) +
-  theme_minimal()
+  theme_den()
 
 # Visualize total travel cost by school
 ggplot(
@@ -1240,7 +1252,7 @@ ggplot(
 ) +
   geom_col() +
   scale_y_continuous(labels = scales::dollar_format()) +
-  scale_fill_brewer(palette = "Set2", name = "Strength") +
+  scale_fill_den(palette = "secondarydark", name = "Strength") +
   coord_flip() +
   labs(
     title = "Total Travel Cost by School",
@@ -1253,7 +1265,7 @@ ggplot(
     x = "School",
     y = "Total Travel Cost ($)"
   ) +
-  theme_minimal()
+  theme_den()
 
 # Travel hours vs cost scatter
 ggplot(
@@ -1267,14 +1279,14 @@ ggplot(
   geom_point(size = 4) +
   geom_text(aes(label = school_name), hjust = -0.1, vjust = 0.5, size = 3) +
   scale_y_continuous(labels = scales::dollar_format()) +
-  scale_color_brewer(palette = "Set2", name = "Strength") +
+  scale_color_den(palette = "secondarydark", name = "Strength") +
   labs(
     title = "Travel Hours vs Travel Cost by School",
     subtitle = "Schools prefer lower values on both axes",
     x = "Total Travel Hours",
     y = "Total Travel Cost ($)"
   ) +
-  theme_minimal() +
+  theme_den() +
   expand_limits(x = max(travel_by_school$total_travel_hours) * 1.2)
 
 # -----------------------------------------------------------------------------
@@ -1338,7 +1350,7 @@ ggplot() +
     fontface = "bold"
   ) +
   scale_color_manual(
-    values = c("B" = "steelblue", "P" = "firebrick"),
+    values = c("B" = den_cols("granvilledarkblue"), "P" = den_cols("red")),
     labels = c("B" = "Bus", "P" = "Plane"),
     name = "Travel Mode"
   ) +
@@ -1356,7 +1368,7 @@ ggplot() +
     x = "Longitude",
     y = "Latitude"
   ) +
-  theme_minimal() +
+  theme_den() +
   theme(
     panel.grid.minor = element_blank(),
     legend.position = "right"
@@ -1491,7 +1503,7 @@ plot_school_schedule_map <- function(
       aes(x = lon, y = lat, size = strength),
       # aes(x = lon, y = lat, size = strength + 3),
       shape = 21,
-      fill = "gold",
+      fill = den_cols("tasseldarkgold"),
       color = "black",
       stroke = 2
     ) +
@@ -1517,7 +1529,10 @@ plot_school_schedule_map <- function(
       vjust = -1.8
     ) +
     scale_color_manual(
-      values = c("Home" = "forestgreen", "Away" = "firebrick"),
+      values = c(
+        "Home" = den_cols("hillsidedarkgreen"),
+        "Away" = den_cols("red")
+      ),
       name = "Game Type"
     ) +
     scale_linetype_manual(
@@ -1536,7 +1551,7 @@ plot_school_schedule_map <- function(
       x = "Longitude",
       y = "Latitude"
     ) +
-    theme_minimal() +
+    theme_den() +
     theme(
       panel.grid.minor = element_blank(),
       legend.position = "right"
@@ -1589,8 +1604,8 @@ ggplot(
   aes(x = type_label, y = total_games, fill = strength_match)
 ) +
   geom_col() +
-  scale_fill_brewer(
-    palette = "Set2",
+  scale_fill_den(
+    palette = "secondarydark",
     labels = c("Mismatched", "Close Match", "Evenly Matched")
   ) +
   labs(
@@ -1600,7 +1615,7 @@ ggplot(
     y = "Total Games",
     fill = "Match Strength"
   ) +
-  theme_minimal() +
+  theme_den() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 # Visualize final prices
@@ -1609,7 +1624,7 @@ ggplot(
   aes(x = type_label, y = price, fill = price)
 ) +
   geom_col() +
-  scale_fill_viridis_c(option = "plasma") +
+  scale_fill_den(palette = "secondarydark", discrete = FALSE) +
   labs(
     title = "Final Auction Prices by Game Type",
     subtitle = "Higher prices indicate higher demand",
@@ -1617,7 +1632,7 @@ ggplot(
     y = "Price (tokens)",
     fill = "Price"
   ) +
-  theme_minimal() +
+  theme_den() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 # Price evolution over iterations
@@ -1629,7 +1644,7 @@ if (nrow(auction_results$iteration_log) > 0) {
   ggplot(price_evolution, aes(x = iteration, y = price, color = type_label)) +
     geom_line(linewidth = 1) +
     geom_point(size = 2) +
-    scale_color_viridis_d(option = "turbo") +
+    scale_color_den(palette = "secondarydark") +
     labs(
       title = "Price Evolution During Auction",
       subtitle = "How prices adjusted based on demand",
@@ -1637,7 +1652,7 @@ if (nrow(auction_results$iteration_log) > 0) {
       y = "Price (tokens)",
       color = "Game Type"
     ) +
-    theme_minimal()
+    theme_den()
 }
 
 # Final budget analysis
@@ -1659,7 +1674,7 @@ ggplot(
   aes(x = reorder(school_name, spent), y = spent, fill = strength)
 ) +
   geom_col() +
-  scale_fill_viridis_c(option = "plasma") +
+  scale_fill_den(palette = "secondarydark", discrete = FALSE) +
   coord_flip() +
   labs(
     title = "Tokens Spent by School",
@@ -1668,7 +1683,7 @@ ggplot(
     y = "Tokens Spent",
     fill = "Strength"
   ) +
-  theme_minimal()
+  theme_den()
 
 # =============================================================================
 # SECTION 10: CREATE READABLE SCHEDULE OUTPUT
@@ -1959,20 +1974,26 @@ print(weekly_schedule, n = 60)
 # =============================================================================
 
 # Create a heatmap of the schedule
-schedule_df <- as_tibble(final_schedule, rownames = "away_school") |>
+schedule_df <- final_schedule |>
+  as.data.frame() |>
+  rownames_to_column("away_school") |>
   pivot_longer(-away_school, names_to = "home_school", values_to = "games") |>
   mutate(
     away_school = str_remove(away_school, "School_"),
     home_school = str_remove(home_school, "School_")
   )
 
-ggplot(
+gg <- ggplot(
   schedule_df,
   aes(x = home_school, y = away_school, fill = factor(games))
 ) +
   geom_tile(color = "white") +
   scale_fill_manual(
-    values = c("0" = "gray95", "1" = "steelblue", "2" = "darkblue"),
+    values = c(
+      "0" = den_cols("neutralcoolgray"),
+      "1" = den_cols("granvilledarkblue"),
+      "2" = "blue"
+    ),
     name = "Games"
   ) +
   labs(
@@ -1981,12 +2002,13 @@ ggplot(
     x = "Home School",
     y = "Away School"
   ) +
-  theme_minimal() +
+  theme_den() +
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1),
     panel.grid = element_blank()
   ) +
   coord_fixed()
+gg
 
 cat("\n")
 cat("=" |> rep(60) |> paste(collapse = ""), "\n")
