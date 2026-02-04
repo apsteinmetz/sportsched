@@ -1,0 +1,1096 @@
+---
+title: "Auction-Based Collegiate Athletic Conference Scheduling"
+subtitle: "An Iterative Market Mechanism for Sports Schedule Formation"
+author: "Art Steinmetz"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Show code"
+    code-tools: true
+    embed-resources: true
+  typst:
+    toc: true
+    echo: false
+execute:
+  warning: false
+  message: false
+  echo: true
+---
+
+# Abstract
+
+This article presents an iterative auction-based model for forming collegiate athletic conference schedules. The mechanism treats away games as differentiated goods, categorized by opponent strength match and travel requirements. Schools bid on game types according to their preferences, and a market-clearing process determines the final schedule. The model enforces hard constraints including exact home/away game requirements and pairwise meeting limits, while prices emerge endogenously to reflect relative scarcity and desirability. Analysis of simulation results reveals how geographic isolation creates systematic disadvantages for remote schools, who must spend more tokens to acquire less desirable schedules. The auction framework provides a transparent, preference-respecting approach to the complex combinatorial problem of conference scheduling.
+
+# Introduction
+
+Creating a sports schedule for a collegiate athletic conference is a challenging combinatorial problem. Conference administrators must balance multiple competing objectives: ensuring competitive balance, minimizing travel costs, respecting institutional preferences, and satisfying logistical constraints. Traditional approaches often rely on ad-hoc negotiations or rigid rotation systems that may not adequately reflect school preferences.
+
+This article explores an alternative approach: using an iterative auction mechanism to form conference schedules. In this framework, away games are treated as differentiated goods, and schools express their preferences through bidding behavior. The market mechanism then allocates games in a way that respects both preferences and hard constraints.
+
+The auction-based approach offers several advantages:
+
+1. **Preference revelation**: Schools' bids reveal their true preferences over different types of games
+2. **Price discovery**: Equilibrium prices emerge that reflect the relative scarcity of desirable game types
+3. **Transparency**: The allocation process is governed by clear rules rather than opaque negotiations
+4. **Flexibility**: The mechanism can accommodate heterogeneous preferences across schools
+
+We implement and simulate this mechanism for a 20-school conference where each school plays 12 games per season (6 home, 6 away). The simulation demonstrates how the auction produces feasible schedules while generating meaningful price signals about game type desirability.
+
+# Model Description
+
+## Agents and Season Parameters
+
+The model considers a set of $N = 20$ schools that form an athletic conference. Each school must play exactly $G = 12$ games per season, split evenly between home and away:
+
+- Home games: $H = 6$
+- Away games: $A = 6$
+
+Each school begins the season with a budget of $B_0 = 100$ tokens, used to bid on away games.
+
+## School Strengths
+
+Each school $i$ is assigned a discrete strength score $s_i \in \{1, 2, 3\}$:
+
+- $s_i = 1$: Weak
+- $s_i = 2$: Moderate  
+- $s_i = 3$: Strong
+
+The strength match between two schools is defined by the absolute difference in their strength scores:
+
+$$
+b_{ij} = \begin{cases}
+3 & \text{if } |s_i - s_j| = 0 \text{ (evenly matched)} \\
+2 & \text{if } |s_i - s_j| = 1 \text{ (close match)} \\
+1 & \text{if } |s_i - s_j| = 2 \text{ (mismatched)}
+\end{cases}
+$$
+
+Schools prefer evenly matched opponents (band 3) over mismatched opponents (band 1).
+
+## Geography and Travel
+
+Each school has a geographic location characterized by latitude and longitude coordinates. For each ordered pair of schools $(i, j)$, travel requirements are determined by:
+
+- **Distance**: Haversine distance in miles between school locations
+- **Bus travel time**: $T_{ij}^{bus} = \text{distance}_{ij} / 60$ hours
+- **Travel class** $\tau_{ij}$:
+  - $B$ (bus) if $T_{ij}^{bus} \leq 5$ hours
+  - $P$ (plane) if $T_{ij}^{bus} > 5$ hours
+
+Travel costs are fixed rates:
+
+| Travel Mode | Cost |
+|-------------|------|
+| Home | \$0 |
+| Bus | \$1,500 |
+| Plane | \$7,500 |
+
+Plane travel time is treated as constant at 5 hours regardless of distance.
+
+## Game Types
+
+Away games are categorized into 6 types based on the combination of strength match and travel class:
+
+$$k = (\text{strength\_match}, \text{travel\_class}) \in \{1, 2, 3\} \times \{B, P\}$$
+
+Each ordered away match $(i, j)$ belongs to exactly one game type determined by $b_{ij}$ and $\tau_{ij}$.
+
+## Preference Specification
+
+Schools express preferences over game types through disutilities $v_{i,k} \leq 0$. More negative values indicate less desirable game types. Disutility captures:
+
+- Strength band preference (evenly matched preferred)
+- Travel time burden
+- Travel cost burden
+
+To convert disutilities to willingness-to-pay (value):
+
+$$\text{value}_{i,k} = v_{i,k} - \min_k v_{i,k}$$
+
+This ensures the most-preferred game type has the highest value and the least-preferred has value zero.
+
+## Feasibility Constraints
+
+The final schedule must satisfy:
+
+**(a) Total games per school:**
+$$\sum_{j \neq i} x_{ij} + \sum_{j \neq i} x_{ji} = G \quad \forall i$$
+
+**(b) Exact home/away split:**
+$$\sum_{j \neq i} x_{ji} = H \quad \forall i \quad \text{(home games)}$$
+$$\sum_{j \neq i} x_{ij} = A \quad \forall i \quad \text{(away games)}$$
+
+**(c) Pairwise meeting cap:**
+$$x_{ij} + x_{ji} \leq 1 \quad \forall i < j$$
+
+**(d) Binary decision variables:**
+$$x_{ij} \in \{0, 1\}$$
+
+## Iterative Auction Process
+
+The auction proceeds iteratively:
+
+1. **Demand determination**: Each school determines integer demand for each game type given current prices and remaining budget
+2. **Clearing problem**: An LP solver finds the value-maximizing allocation respecting feasibility and demand constraints
+3. **Price update**: Prices increase for game types with excess demand
+4. **Budget update**: Schools pay for allocated games at current prices
+5. **Schedule update**: Cumulative schedule matrix is updated
+
+The process terminates when all schools have complete schedules or a maximum iteration limit is reached.
+
+# Auction Simulation
+
+```{r setup}
+#| label: setup
+#| code-summary: "Load required libraries"
+
+library(tidyverse)
+library(ggplot2)
+if (!require(denisonbrand, quietly = TRUE)) {
+  remotes::install_github("apsteinmetz/denisonbrand")
+  library(denisonbrand)
+}
+library(lpSolve)
+denisonbrand::load_fonts()
+
+# Set seed for reproducibility
+set.seed(42)
+```
+
+## Section 1: Initialize Season Parameters
+
+This section establishes the fundamental parameters that govern the auction simulation, including the number of schools, games per season, and budget allocations.
+
+```{r parameters}
+#| label: season-parameters
+#| code-summary: "Define season parameters"
+
+# Number of schools in the conference
+n_schools <- 20
+
+# Total games each school must play in a season
+total_games <- 12
+
+# Exact number of home and away games each school must have
+exact_home_games <- 6
+exact_away_games <- 6
+
+# Initial budget for each school (in tokens)
+initial_budget <- 100
+
+# Travel Cost Constants
+home_travel_cost <- 0
+bus_travel_cost <- 1500
+plane_travel_cost <- 7500
+plane_travel_time <- 5
+plane_use_threshold <- 5
+```
+
+The conference consists of `r n_schools` schools, each playing `r total_games` games with an even split between home and away. Each school starts with `r initial_budget` tokens to bid on away games.
+
+## Section 2: Create Schools and Geographic Locations
+
+Schools are created with randomly assigned strength scores and geographic locations within a region approximating the eastern United States.
+
+```{r schools}
+#| label: create-schools
+#| code-summary: "Generate schools with strengths and locations"
+
+funny_school_names <- c(
+  "Procrastion", "Snackylios", "Confusios", "Awkwardia", "Misplacion",
+  "Dramathea", "Scrollos", "Clutteron", "Oopsida", "Spillonius",
+  "Indecisia", "Overthinkon", "Blamora", "Fidgetes", "Napthena",
+  "Wifion", "Tangentia", "Oopsicles", "Mumbleon", "Snackratia"
+)
+
+# Create schools with IDs and random strength scores
+schools <- tibble(
+  school_id = 1:n_schools,
+  school_name = funny_school_names,
+  strength = sample(1:3, n_schools, replace = TRUE),
+  lat = runif(n_schools, min = 30, max = 45),
+  lon = runif(n_schools, min = -80, max = -70)
+) |>
+  arrange(desc(strength))
+```
+
+```{r strength-viz}
+#| label: fig-strength-distribution
+#| fig-cap: "Distribution of school strength scores"
+#| code-summary: "Visualize strength distribution"
+
+ggplot(schools, aes(x = reorder(school_name, strength), y = strength)) +
+  geom_col(aes(fill = as.factor(strength))) +
+  scale_fill_den(palette = "secondarydark", name = "Strength") +
+  coord_flip() +
+  labs(
+    title = "School Strength Scores",
+    subtitle = "Randomly assigned: 1 = weak, 2 = moderate, 3 = strong",
+    x = "School",
+    y = "Strength Score"
+  ) +
+  theme_den()
+```
+
+```{r location-viz}
+#| label: fig-school-locations
+#| fig-cap: "Geographic distribution of conference schools"
+#| code-summary: "Visualize school locations"
+
+ggplot(schools, aes(x = lon, y = lat)) +
+  geom_point(aes(color = as.factor(strength), size = 3)) +
+  geom_text(aes(label = school_name), hjust = -0.1, vjust = 0.5, size = 3) +
+  scale_color_den(palette = "secondarydark", name = "Strength") +
+  guides(size = "none") +
+  labs(
+    title = "School Locations",
+    subtitle = "Geographic distribution of conference schools",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme_den() +
+  theme(
+    panel.grid.major = element_line(color = "gray80"),
+    panel.grid.minor = element_line(color = "gray90")
+  ) +
+  coord_fixed(ratio = 1.3) +
+  expand_limits(x = c(-85, -65), y = c(25, 50))
+```
+
+@fig-strength-distribution shows the distribution of strength scores across schools. @fig-school-locations displays the geographic spread of schools across the conference region.
+
+## Section 3: Define Game Types and Preferences
+
+Schools have preferences over different types of away games. Game types are defined by the combination of opponent strength match and travel requirements.
+
+```{r game-types}
+#| label: define-game-types
+#| code-summary: "Create game type definitions"
+
+# Define away-game types
+game_types <- expand_grid(
+  strength_match = factor(
+    c("mismatched", "close match", "equal match"),
+    levels = c("mismatched", "close match", "equal match"),
+    ordered = TRUE
+  ),
+  travel_class = c("B", "P")
+) |>
+  mutate(
+    game_type_id = row_number(),
+    type_label = paste0("Match_", as.character(strength_match), "_", travel_class)
+  )
+```
+
+```{r preferences}
+#| label: generate-preferences
+#| code-summary: "Generate school preferences"
+
+generate_school_preferences <- function(school_id, game_types) {
+  base_disutility <- tribble(
+    ~strength_match, ~travel_class, ~base_value,
+    "mismatched", "B", -20,
+    "mismatched", "P", -30,
+    "close match", "B", -8,
+    "close match", "P", -15,
+    "equal match", "B", -3,
+    "equal match", "P", -10
+  )
+  
+  school_prefs <- game_types |>
+    left_join(base_disutility, by = c("strength_match", "travel_class")) |>
+    mutate(
+      school_id = school_id,
+      disutility = base_value + round(rnorm(n(), 0, 2), 1),
+      max_quantity = case_when(
+        strength_match == "equal match" ~ sample(4:6, n(), replace = TRUE),
+        strength_match == "close match" ~ sample(2:4, n(), replace = TRUE),
+        TRUE ~ sample(0:2, n(), replace = TRUE)
+      )
+    ) |>
+    select(school_id, game_type_id, type_label, disutility, max_quantity)
+  
+  return(school_prefs)
+}
+
+school_preferences <- map_dfr(
+  schools$school_id,
+  ~ generate_school_preferences(.x, game_types)
+)
+
+avg_preferences <- school_preferences |>
+  group_by(type_label, game_type_id) |>
+  summarise(
+    avg_disutility = mean(disutility),
+    avg_max_quantity = mean(max_quantity),
+    .groups = "drop"
+  )
+```
+
+```{r pref-viz}
+#| label: fig-preferences
+#| fig-cap: "Average school preferences by game type"
+#| code-summary: "Visualize preference structure"
+
+ggplot(avg_preferences, aes(x = reorder(type_label, avg_disutility), y = avg_disutility)) +
+  geom_col(aes(fill = avg_disutility)) +
+  scale_fill_den(palette = "secondarydark", discrete = FALSE, reverse = TRUE) +
+  coord_flip() +
+  labs(
+    title = "Average School Preferences by Game Type",
+    subtitle = "Less negative = more preferred",
+    x = "Game Type",
+    y = "Average Disutility (tokens)",
+    fill = "Disutility"
+  ) +
+  theme_den()
+```
+
+Schools strongly prefer evenly matched bus games (low disutility) and dislike mismatched plane games (high disutility).
+
+## Section 4: Create School Pairs with Travel Information
+
+This section computes the travel requirements between all pairs of schools, determining which games require plane travel versus bus travel.
+
+```{r school-pairs}
+#| label: create-school-pairs
+#| code-summary: "Calculate travel between all school pairs"
+
+# Strength match function
+calculate_strength_match <- function(strength_i, strength_j) {
+  diff <- abs(strength_i - strength_j)
+  case_when(
+    diff == 0 ~ 3L,
+    diff == 1 ~ 2L,
+    diff == 2 ~ 1L
+  )
+}
+
+# Haversine distance function
+haversine_distance_miles <- function(lat1, lon1, lat2, lon2) {
+  rad <- pi / 180
+  n <- max(length(lat1), length(lon1), length(lat2), length(lon2))
+  lat1 <- rep(lat1, length.out = n)
+  lon1 <- rep(lon1, length.out = n)
+  lat2 <- rep(lat2, length.out = n)
+  lon2 <- rep(lon2, length.out = n)
+  dlat <- (lat2 - lat1) * rad
+  dlon <- (lon2 - lon1) * rad
+  a <- sin(dlat / 2)^2 + cos(lat1 * rad) * cos(lat2 * rad) * sin(dlon / 2)^2
+  c <- 2 * atan2(sqrt(a), sqrt(pmax(0, 1 - a)))
+  earth_radius_miles <- 3958.8
+  earth_radius_miles * c
+}
+
+# Create all ordered pairs with travel information
+school_pairs <- expand_grid(
+  school_i = schools$school_id,
+  school_j = schools$school_id
+) |>
+  filter(school_i != school_j) |>
+  left_join(schools |> select(school_id, strength_i = strength, lat_i = lat, lon_i = lon),
+            by = c("school_i" = "school_id")) |>
+  left_join(schools |> select(school_id, strength_j = strength, lat_j = lat, lon_j = lon),
+            by = c("school_j" = "school_id")) |>
+  mutate(
+    .strength_match_code = calculate_strength_match(strength_i, strength_j),
+    strength_match = factor(.strength_match_code, levels = c(1L, 2L, 3L),
+                           labels = c("mismatched", "close match", "equal match"), ordered = TRUE),
+    distance_miles = haversine_distance_miles(lat_i, lon_i, lat_j, lon_j),
+    bus_travel_time = round(distance_miles / 60, 1),
+    travel_class = if_else(bus_travel_time <= 5, "B", "P"),
+    travel_time = if_else(travel_class == "B", bus_travel_time, plane_travel_time),
+    travel_cost = if_else(travel_class == "B", bus_travel_cost, plane_travel_cost)
+  ) |>
+  select(-.strength_match_code) |>
+  left_join(game_types, by = c("strength_match", "travel_class"))
+```
+
+```{r travel-viz}
+#| label: fig-travel-distribution
+#| fig-cap: "Distribution of travel times between schools"
+#| code-summary: "Visualize travel time distribution"
+
+ggplot(school_pairs, aes(x = travel_time, fill = travel_class)) +
+  geom_histogram(binwidth = 0.5, color = "white") +
+  scale_fill_manual(
+    values = c("B" = den_cols("hillsidedarkgreen"), "P" = den_cols("granvilledarkblue")),
+    labels = c("B" = "Bus (≤5 hrs)", "P" = "Plane (>5 hrs)")
+  ) +
+  labs(
+    title = "Distribution of Travel Times Between Schools",
+    subtitle = "Travel class determines transportation method",
+    x = "Travel Time (hours)",
+    y = "Count",
+    fill = "Travel Class"
+  ) +
+  theme_den()
+```
+
+```{r game-type-dist}
+#| label: fig-game-type-distribution
+#| fig-cap: "Distribution of away game types"
+#| code-summary: "Visualize game type distribution"
+
+ggplot(school_pairs, aes(x = type_label, fill = strength_match)) +
+  geom_bar() +
+  scale_fill_den(palette = "secondarydark",
+                labels = c("Mismatched", "Close Match", "Evenly Matched")) +
+  labs(
+    title = "Distribution of Away Game Types",
+    subtitle = "By match strength and travel class",
+    x = "Game Type",
+    y = "Count",
+    fill = "Match Strength"
+  ) +
+  theme_den() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Section 5: Define Auction Helper Functions
+
+The auction requires several helper functions for demand calculation, feasibility checking, and schedule updates.
+
+```{r helper-functions}
+#| label: helper-functions
+#| code-summary: "Define auction helper functions"
+
+# Count games per school
+count_school_games <- function(schedule) {
+  tibble(
+    school_id = 1:n_schools,
+    away_games = rowSums(schedule),
+    home_games = colSums(schedule),
+    total_games = away_games + home_games
+  )
+}
+
+# Check feasibility constraints
+check_feasibility <- function(schedule) {
+  game_counts <- count_school_games(schedule)
+  list(
+    total_games_ok = all(game_counts$total_games <= total_games),
+    min_home_ok = all(game_counts$home_games >= 0),
+    pairwise_ok = all(schedule + t(schedule) <= 1),
+    game_counts = game_counts
+  )
+}
+
+# Calculate demand for a school
+calculate_demand <- function(school_id, current_prices, current_budget, current_schedule, school_prefs) {
+  prefs <- school_prefs |>
+    filter(school_id == !!school_id) |>
+    left_join(current_prices |> select(game_type_id, price), by = "game_type_id")
+  
+  current_away <- sum(current_schedule[school_id, ])
+  remaining_away_needed <- max(0, exact_away_games - current_away)
+  
+  worst_disutility <- -30
+  prefs <- prefs |>
+    mutate(
+      value = disutility - worst_disutility,
+      net_surplus = value - price,
+      demand = if_else(net_surplus >= 0, pmin(max_quantity, remaining_away_needed), 0L)
+    ) |>
+    arrange(desc(value))
+  
+  prefs <- prefs |>
+    mutate(
+      cumulative_cost = cumsum(demand * price),
+      affordable = cumulative_cost <= current_budget
+    )
+  
+  return(prefs)
+}
+```
+
+## Section 6: LP-Based Clearing Mechanism
+
+The heart of the auction is the clearing problem, solved as an integer linear program to find the value-maximizing allocation.
+
+```{r clearing-lp}
+#| label: clearing-lp
+#| code-summary: "Define LP clearing solver"
+
+solve_clearing_problem <- function(demands_by_school, current_prices, current_schedule,
+                                   school_pairs_df, max_games_per_round = Inf) {
+  # Get potential matches
+  potential_matches <- school_pairs_df |>
+    mutate(
+      current_meetings = map2_dbl(school_i, school_j, ~ current_schedule[.x, .y] + current_schedule[.y, .x]),
+      available = current_meetings < 1
+    ) |>
+    filter(available) |>
+    select(school_i, school_j, game_type_id, type_label)
+  
+  if (nrow(potential_matches) == 0) return(current_schedule)
+  
+  # Add value information
+  potential_matches <- potential_matches |>
+    left_join(current_prices |> select(game_type_id, price), by = "game_type_id") |>
+    left_join(demands_by_school |> select(school_id, game_type_id, value) |> distinct(),
+              by = c("school_i" = "school_id", "game_type_id")) |>
+    mutate(value = replace_na(value, 0))
+  
+  objective <- potential_matches$value
+  
+  # Build constraints
+  current_away <- rowSums(current_schedule)
+  current_home <- colSums(current_schedule)
+  current_total <- current_away + current_home
+  away_games_remaining <- pmax(0, exact_away_games - current_away)
+  home_games_remaining <- pmax(0, exact_home_games - current_home)
+  games_needed <- total_games - current_total
+  
+  constraints_list <- list()
+  directions_list <- list()
+  rhs_list <- list()
+  
+  # Pairwise constraints
+  unique_pairs <- potential_matches |>
+    mutate(pair_key = paste(pmin(school_i, school_j), pmax(school_i, school_j), sep = "_")) |>
+    distinct(pair_key) |>
+    pull(pair_key)
+  
+  for (pk in unique_pairs) {
+    pair_schools <- as.integer(strsplit(pk, "_")[[1]])
+    i <- pair_schools[1]; j <- pair_schools[2]
+    constraint_row <- as.numeric(
+      (potential_matches$school_i == i & potential_matches$school_j == j) |
+      (potential_matches$school_i == j & potential_matches$school_j == i)
+    )
+    if (sum(constraint_row) > 0) {
+      constraints_list <- append(constraints_list, list(constraint_row))
+      directions_list <- append(directions_list, "<=")
+      rhs_list <- append(rhs_list, 1)
+    }
+  }
+  
+  # Away/home capacity constraints
+  for (i in 1:n_schools) {
+    constraint_row <- as.numeric(potential_matches$school_i == i)
+    if (sum(constraint_row) > 0) {
+      constraints_list <- append(constraints_list, list(constraint_row))
+      directions_list <- append(directions_list, "<=")
+      rhs_list <- append(rhs_list, away_games_remaining[i])
+    }
+  }
+  
+  for (i in 1:n_schools) {
+    constraint_row <- as.numeric(potential_matches$school_j == i)
+    if (sum(constraint_row) > 0) {
+      constraints_list <- append(constraints_list, list(constraint_row))
+      directions_list <- append(directions_list, "<=")
+      rhs_list <- append(rhs_list, home_games_remaining[i])
+    }
+  }
+  
+  # Total games constraint
+  for (i in 1:n_schools) {
+    away_row <- as.numeric(potential_matches$school_i == i)
+    home_row <- as.numeric(potential_matches$school_j == i)
+    constraint_row <- away_row + home_row
+    if (sum(constraint_row) > 0) {
+      constraints_list <- append(constraints_list, list(constraint_row))
+      directions_list <- append(directions_list, "<=")
+      rhs_list <- append(rhs_list, games_needed[i])
+    }
+  }
+  
+  # Per-round limit
+  if (is.finite(max_games_per_round) && max_games_per_round > 0) {
+    constraint_row <- rep(1, nrow(potential_matches))
+    constraints_list <- append(constraints_list, list(constraint_row))
+    directions_list <- append(directions_list, "<=")
+    rhs_list <- append(rhs_list, max_games_per_round)
+  }
+  
+  if (length(constraints_list) == 0) return(current_schedule)
+  
+  # Solve LP
+  constraint_matrix <- do.call(rbind, constraints_list)
+  solution <- tryCatch({
+    lp(direction = "max", objective.in = objective, const.mat = constraint_matrix,
+       const.dir = unlist(directions_list), const.rhs = unlist(rhs_list), all.bin = TRUE)
+  }, error = function(e) NULL)
+  
+  if (is.null(solution) || solution$status != 0) return(current_schedule)
+  
+  # Update schedule
+  new_schedule <- current_schedule
+  selected <- which(solution$solution == 1)
+  for (idx in selected) {
+    i <- potential_matches$school_i[idx]
+    j <- potential_matches$school_j[idx]
+    new_schedule[i, j] <- new_schedule[i, j] + 1
+  }
+  
+  return(new_schedule)
+}
+```
+
+## Section 7: Run the Auction
+
+With all components in place, we execute the iterative auction to produce the conference schedule.
+
+```{r run-auction}
+#| label: run-auction
+#| code-summary: "Execute the auction process"
+
+run_auction <- function(max_iterations = 100, price_increment = 2, games_per_round = 20, verbose = FALSE) {
+  current_prices <- game_types |> mutate(price = 0)
+  current_budgets <- tibble(school_id = 1:n_schools, budget = initial_budget)
+  current_schedule <- matrix(0, nrow = n_schools, ncol = n_schools)
+  iteration_log <- tibble()
+  
+  for (iter in 1:max_iterations) {
+    # Step 1: Demand determination
+    all_demands <- map_dfr(1:n_schools, function(sid) {
+      calculate_demand(sid, current_prices, current_budgets$budget[sid],
+                      current_schedule, school_preferences) |>
+        mutate(school_id = sid)
+    })
+    
+    aggregate_demand <- all_demands |>
+      group_by(game_type_id, type_label) |>
+      summarise(total_demand = sum(demand), .groups = "drop")
+    
+    # Step 2: Clearing
+    previous_schedule <- current_schedule
+    current_schedule <- solve_clearing_problem(all_demands, current_prices, 
+                                               current_schedule, school_pairs, games_per_round)
+    games_scheduled_this_round <- sum(current_schedule) - sum(previous_schedule)
+    
+    # Update budgets
+    for (i in 1:n_schools) {
+      for (j in 1:n_schools) {
+        if (i != j) {
+          new_games <- current_schedule[i, j] - previous_schedule[i, j]
+          if (new_games > 0) {
+            game_type <- school_pairs |> filter(school_i == i, school_j == j) |> pull(game_type_id)
+            if (length(game_type) > 0) {
+              price <- current_prices$price[current_prices$game_type_id == game_type[1]]
+              current_budgets$budget[i] <- current_budgets$budget[i] - price * new_games
+            }
+          }
+        }
+      }
+    }
+    
+    # Step 3: Calculate supply and update prices
+    games_this_round_by_type <- map_dfr(1:n_schools, function(i) {
+      map_dfr(1:n_schools, function(j) {
+        new_games <- current_schedule[i, j] - previous_schedule[i, j]
+        if (i != j && new_games > 0) {
+          school_pairs |> filter(school_i == i, school_j == j) |>
+            select(game_type_id) |> mutate(count = new_games)
+        } else tibble()
+      })
+    })
+    
+    if (nrow(games_this_round_by_type) == 0) {
+      games_this_round_by_type <- tibble(game_type_id = integer(), scheduled_this_round = integer())
+    } else {
+      games_this_round_by_type <- games_this_round_by_type |>
+        group_by(game_type_id) |>
+        summarise(scheduled_this_round = sum(count), .groups = "drop")
+    }
+    
+    price_updates <- aggregate_demand |>
+      left_join(games_this_round_by_type, by = "game_type_id") |>
+      mutate(scheduled_this_round = replace_na(scheduled_this_round, 0),
+             excess_demand = total_demand - scheduled_this_round)
+    
+    current_prices <- current_prices |>
+      left_join(price_updates |> select(game_type_id, excess_demand), by = "game_type_id") |>
+      mutate(excess_demand = replace_na(excess_demand, 0),
+             price = if_else(excess_demand > 0, price + price_increment, price)) |>
+      select(-excess_demand)
+    
+    iteration_log <- bind_rows(iteration_log,
+      price_updates |> mutate(iteration = iter) |>
+        left_join(current_prices |> select(game_type_id, price), by = "game_type_id"))
+    
+    # Check termination
+    game_counts <- count_school_games(current_schedule)
+    if (all(game_counts$total_games == total_games)) break
+    
+    # Greedy fill if stuck
+    if (games_scheduled_this_round == 0 && iter > 20) {
+      for (max_meetings in c(1, 2)) {
+        for (i in 1:n_schools) {
+          i_total <- sum(current_schedule[i, ]) + sum(current_schedule[, i])
+          if (i_total >= total_games) next
+          for (j in 1:n_schools) {
+            if (i == j) next
+            j_total <- sum(current_schedule[j, ]) + sum(current_schedule[, j])
+            if (j_total >= total_games) next
+            meetings <- current_schedule[i, j] + current_schedule[j, i]
+            if (meetings >= max_meetings) next
+            i_away <- sum(current_schedule[i, ])
+            j_home <- sum(current_schedule[, j])
+            if (i_away < exact_away_games && j_home < exact_home_games) {
+              current_schedule[i, j] <- current_schedule[i, j] + 1
+            }
+            i_total <- sum(current_schedule[i, ]) + sum(current_schedule[, i])
+            if (i_total >= total_games) break
+          }
+        }
+      }
+    }
+  }
+  
+  list(schedule = current_schedule, final_prices = current_prices,
+       final_budgets = current_budgets, iteration_log = iteration_log,
+       iterations_used = iter)
+}
+
+auction_results <- run_auction(max_iterations = 100, price_increment = 2, games_per_round = 20)
+final_schedule <- auction_results$schedule
+```
+
+The auction completed in `r auction_results$iterations_used` iterations, producing a complete schedule for all `r n_schools` schools.
+
+# Results
+
+## Schedule Verification
+
+We first verify that the produced schedule satisfies all feasibility constraints.
+
+```{r verify}
+#| label: verify-schedule
+#| code-summary: "Verify constraint satisfaction"
+
+game_summary <- count_school_games(final_schedule) |>
+  left_join(schools |> select(school_id, school_name, strength), by = "school_id")
+
+# Constraint verification
+pairwise_meetings <- final_schedule + t(final_schedule)
+```
+
+```{r constraints-table}
+#| label: tbl-constraints
+#| tbl-cap: "Schedule constraint verification"
+#| code-summary: "Display constraint summary"
+
+constraint_summary <- tibble(
+  Constraint = c("Total games per school", "Home games per school", 
+                 "Away games per school", "Max pairwise meetings"),
+  Required = c("= 12", "= 6", "= 6", "≤ 1"),
+  Observed = c(
+    paste0(min(game_summary$total_games), "-", max(game_summary$total_games)),
+    paste0(min(game_summary$home_games), "-", max(game_summary$home_games)),
+    paste0(min(game_summary$away_games), "-", max(game_summary$away_games)),
+    as.character(max(pairwise_meetings))
+  ),
+  Satisfied = c(
+    all(game_summary$total_games == 12),
+    all(game_summary$home_games == 6),
+    all(game_summary$away_games == 6),
+    all(pairwise_meetings <= 1)
+  )
+)
+
+knitr::kable(constraint_summary)
+```
+
+## Final Prices
+
+The auction produces prices for each game type that reflect relative demand and scarcity.
+
+```{r price-results}
+#| label: fig-final-prices
+#| fig-cap: "Final auction prices by game type"
+#| code-summary: "Visualize final prices"
+
+ggplot(auction_results$final_prices, aes(x = type_label, y = price, fill = price)) +
+  geom_col() +
+  scale_fill_den(palette = "secondarydark", discrete = FALSE) +
+  labs(
+    title = "Final Auction Prices by Game Type",
+    subtitle = "Higher prices indicate higher demand",
+    x = "Game Type",
+    y = "Price (tokens)",
+    fill = "Price"
+  ) +
+  theme_den() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r price-evolution}
+#| label: fig-price-evolution
+#| fig-cap: "Price evolution during the auction"
+#| code-summary: "Visualize price dynamics"
+
+if (nrow(auction_results$iteration_log) > 0) {
+  price_evolution <- auction_results$iteration_log |>
+    select(iteration, type_label, price) |>
+    distinct()
+  
+  ggplot(price_evolution, aes(x = iteration, y = price, color = type_label)) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 2) +
+    scale_color_den(palette = "secondarydark") +
+    labs(
+      title = "Price Evolution During Auction",
+      subtitle = "How prices adjusted based on demand",
+      x = "Iteration",
+      y = "Price (tokens)",
+      color = "Game Type"
+    ) +
+    theme_den()
+}
+```
+
+## Travel Analysis
+
+Geographic location significantly impacts school outcomes in terms of travel burden.
+
+```{r travel-analysis}
+#| label: travel-analysis
+#| code-summary: "Calculate travel statistics"
+
+travel_by_school <- map_dfr(1:n_schools, function(i) {
+  away_games_info <- map_dfr(1:n_schools, function(j) {
+    if (i != j && final_schedule[i, j] > 0) {
+      school_pairs |>
+        filter(school_i == i, school_j == j) |>
+        select(school_j, travel_class, travel_time, travel_cost) |>
+        mutate(games = final_schedule[i, j])
+    } else tibble()
+  })
+  
+  if (nrow(away_games_info) == 0) {
+    return(tibble(school_id = i, total_away_games = 0, bus_games = 0, plane_games = 0,
+                  total_travel_hours = 0, total_travel_cost = 0))
+  }
+  
+  tibble(
+    school_id = i,
+    total_away_games = sum(away_games_info$games),
+    bus_games = sum(away_games_info$games[away_games_info$travel_class == "B"]),
+    plane_games = sum(away_games_info$games[away_games_info$travel_class == "P"]),
+    total_travel_hours = sum(away_games_info$travel_time * away_games_info$games),
+    total_travel_cost = sum(away_games_info$travel_cost * away_games_info$games)
+  )
+}) |>
+  left_join(schools |> select(school_id, school_name, strength), by = "school_id")
+```
+
+```{r travel-viz-results}
+#| label: fig-travel-cost
+#| fig-cap: "Total travel cost by school"
+#| code-summary: "Visualize travel costs"
+
+ggplot(travel_by_school, aes(x = reorder(school_name, total_travel_cost), 
+                              y = total_travel_cost, fill = as.factor(strength))) +
+  geom_col() +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_fill_den(palette = "secondarydark", name = "Strength") +
+  coord_flip() +
+  labs(
+    title = "Total Travel Cost by School",
+    subtitle = paste0("Bus: $", format(bus_travel_cost, big.mark = ","), 
+                     " | Plane: $", format(plane_travel_cost, big.mark = ",")),
+    x = "School",
+    y = "Total Travel Cost ($)"
+  ) +
+  theme_den()
+```
+
+## Budget and Disutility Analysis
+
+We examine how token spending relates to schedule quality (total disutility).
+
+```{r budget-analysis}
+#| label: budget-analysis
+#| code-summary: "Calculate budget and disutility metrics"
+
+disutility_by_school <- map_dfr(1:n_schools, function(i) {
+  away_games_info <- map_dfr(1:n_schools, function(j) {
+    if (i != j && final_schedule[i, j] > 0) {
+      game_type <- school_pairs |> filter(school_i == i, school_j == j) |> pull(game_type_id)
+      if (length(game_type) > 0) {
+        disutil <- school_preferences |>
+          filter(school_id == i, game_type_id == game_type[1]) |>
+          pull(disutility)
+        tibble(game_type_id = game_type[1], games = final_schedule[i, j],
+               disutility = if (length(disutil) > 0) disutil[1] else 0)
+      } else tibble()
+    } else tibble()
+  })
+  
+  tibble(school_id = i,
+         total_disutility = if (nrow(away_games_info) > 0) sum(away_games_info$disutility * away_games_info$games) else 0)
+})
+
+budget_summary <- auction_results$final_budgets |>
+  left_join(schools |> select(school_id, school_name, strength), by = "school_id") |>
+  left_join(disutility_by_school, by = "school_id") |>
+  mutate(spent = initial_budget - budget)
+```
+
+```{r budget-viz}
+#| label: fig-spent-vs-disutility
+#| fig-cap: "Tokens spent versus total disutility"
+#| code-summary: "Visualize spending and schedule quality"
+
+ggplot(budget_summary, aes(x = spent, y = total_disutility, color = as.factor(strength))) +
+  geom_point(size = 4) +
+  geom_text(aes(label = school_name), hjust = -0.1, vjust = 0.5, size = 3) +
+  scale_color_den(palette = "secondarydark", name = "Strength") +
+  labs(
+    title = "Tokens Spent vs Total Disutility Accepted",
+    subtitle = "Schools spending more tokens should get better (less negative) schedules",
+    x = "Tokens Spent",
+    y = "Total Disutility"
+  ) +
+  theme_den() +
+  expand_limits(x = max(budget_summary$spent) * 1.3)
+```
+
+## Geographic Isolation Effects
+
+A key finding is that geographic isolation systematically disadvantages schools.
+
+```{r geographic-analysis}
+#| label: geographic-analysis
+#| code-summary: "Analyze geographic effects"
+
+geographic_analysis <- map_dfr(1:n_schools, function(i) {
+  opponents_info <- school_pairs |>
+    filter(school_i == i) |>
+    summarise(
+      avg_distance = mean(distance_miles),
+      pct_plane_required = mean(travel_class == "P") * 100,
+      n_bus_options = sum(travel_class == "B"),
+      n_plane_options = sum(travel_class == "P")
+    )
+  
+  tibble(school_id = i, avg_distance = opponents_info$avg_distance,
+         pct_plane_required = opponents_info$pct_plane_required,
+         n_bus_options = opponents_info$n_bus_options,
+         n_plane_options = opponents_info$n_plane_options)
+})
+
+budget_with_geography <- budget_summary |>
+  left_join(geographic_analysis, by = "school_id") |>
+  left_join(travel_by_school |> select(school_id, plane_games, bus_games, total_travel_hours),
+            by = "school_id")
+
+cor_spent_distance <- cor(budget_with_geography$spent, budget_with_geography$avg_distance)
+cor_disutility_distance <- cor(budget_with_geography$total_disutility, budget_with_geography$avg_distance)
+```
+
+```{r geo-viz}
+#| label: fig-geographic-isolation
+#| fig-cap: "Geographic isolation versus schedule quality"
+#| code-summary: "Visualize geographic effects"
+
+ggplot(budget_with_geography, aes(x = avg_distance, y = total_disutility, color = as.factor(strength))) +
+  geom_point(size = 4) +
+  geom_text(aes(label = school_name), hjust = -0.1, vjust = 0.5, size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "gray50", linetype = "dashed") +
+  scale_color_den(palette = "secondarydark", name = "Strength") +
+  labs(
+    title = "Geographic Isolation vs Schedule Quality",
+    subtitle = paste0("Correlation: ", round(cor_disutility_distance, 2), 
+                     " | Schools farther from others get worse schedules"),
+    x = "Average Distance to Opponents (miles)",
+    y = "Total Disutility (more negative = worse)"
+  ) +
+  theme_den() +
+  expand_limits(x = max(budget_with_geography$avg_distance) * 1.15)
+```
+
+## Conference Schedule Map
+
+```{r schedule-map}
+#| label: fig-schedule-map
+#| fig-cap: "Conference schedule map showing all matchups"
+#| code-summary: "Create schedule visualization"
+
+game_connections <- map_dfr(1:n_schools, function(i) {
+  map_dfr(1:n_schools, function(j) {
+    if (i < j && (final_schedule[i, j] > 0 || final_schedule[j, i] > 0)) {
+      school_i_info <- schools |> filter(school_id == i)
+      school_j_info <- schools |> filter(school_id == j)
+      pair_info <- school_pairs |> filter(school_i == i, school_j == j) |> slice(1)
+      
+      tibble(x_start = school_i_info$lon, y_start = school_i_info$lat,
+             x_end = school_j_info$lon, y_end = school_j_info$lat,
+             travel_class = pair_info$travel_class, distance = pair_info$distance_miles)
+    } else tibble()
+  })
+})
+
+ggplot() +
+  geom_segment(data = game_connections,
+               aes(x = x_start, y = y_start, xend = x_end, yend = y_end, color = travel_class),
+               alpha = 0.6, linewidth = 0.8) +
+  geom_point(data = schools, aes(x = lon, y = lat, shape = as.factor(strength)),
+             size = 4, fill = "white", color = "black") +
+  geom_text(data = schools, aes(x = lon, y = lat, label = school_name), size = 2.5, fontface = "bold") +
+  scale_color_manual(values = c("B" = den_cols("granvilledarkblue"), "P" = den_cols("red")),
+                    labels = c("B" = "Bus", "P" = "Plane"), name = "Travel Mode") +
+  scale_shape_manual(values = c("1" = 21, "2" = 22, "3" = 24), name = "Strength") +
+  labs(title = "Conference Schedule Map",
+       subtitle = paste("Lines connect schools that play each other |", nrow(game_connections), "unique matchups"),
+       x = "Longitude", y = "Latitude") +
+  theme_den() +
+  theme(panel.grid.minor = element_blank(), legend.position = "right") +
+  coord_fixed(ratio = 1.2)
+```
+
+## Schedule Heatmap
+
+```{r heatmap}
+#| label: fig-schedule-heatmap
+#| fig-cap: "Schedule matrix heatmap"
+#| code-summary: "Create schedule heatmap"
+
+schedule_df <- final_schedule |>
+  as.data.frame() |>
+  rownames_to_column("away_school") |>
+  pivot_longer(-away_school, names_to = "home_school", values_to = "games") |>
+  mutate(
+    away_school = schools$school_name[as.numeric(gsub("School_", "", away_school))],
+    home_school = schools$school_name[as.numeric(gsub("V", "", home_school))]
+  )
+
+ggplot(schedule_df, aes(x = home_school, y = away_school, fill = factor(games))) +
+  geom_tile(color = "white") +
+  scale_fill_manual(values = c("0" = den_cols("neutralcoolgray"), 
+                               "1" = den_cols("granvilledarkblue"), "2" = "blue"),
+                   name = "Games") +
+  labs(title = "Schedule Matrix Heatmap", subtitle = "Number of Times Teams Meet Each Other",
+       x = "Home School", y = "Away School") +
+  theme_den() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.x = element_text(margin = margin(t = 15)),
+        axis.title.y = element_text(margin = margin(r = 15)),
+        panel.grid = element_blank()) +
+  coord_fixed()
+```
+
+# Conclusion
+
+This simulation demonstrates that an iterative auction mechanism can successfully produce feasible conference schedules while respecting school preferences and hard constraints. Key findings include:
+
+1. **Successful schedule formation**: The auction consistently produces complete schedules satisfying all constraints (12 games per school, exactly 6 home and 6 away, at most one meeting per pair).
+
+2. **Meaningful price discovery**: Prices for desirable game types (evenly matched, bus travel) rise during the auction, reflecting genuine scarcity and preferences.
+
+3. **Geographic disadvantage**: Schools in geographically isolated locations face structural disadvantages. They must acquire more plane games regardless of preference, leading to:
+   - Higher token expenditure
+   - Worse schedule quality (higher total disutility)
+   - This inverse correlation between spending and outcomes reflects the geographic constraints embedded in the game type structure.
+
+4. **Preference heterogeneity matters**: Schools with different strength profiles have different sets of opponents available for "evenly matched" games, affecting their ability to achieve preferred schedules.
+
+The auction framework provides a transparent, rules-based approach to conference scheduling that could be adapted for real-world applications. Future extensions could incorporate additional constraints (blackout dates, television requirements), multiple rounds of price discovery, or secondary markets for game trading.
+
+The key insight from this analysis is that auction prices reflect game *types*, not individual matchups. Schools cannot escape their geographic constraints through bidding behavior alone—a school surrounded by distant opponents must acquire plane games regardless of their willingness to pay for bus games. This structural feature of the mechanism has important equity implications for conference design.

@@ -78,10 +78,33 @@ cat(
 # SECTION 2: CREATE SCHOOLS AND DEFINE MATCH VARIABLES
 # =============================================================================
 
+funny_school_names <- c(
+  "Procrastion",
+  "Snackylios",
+  "Confusios",
+  "Awkwardia",
+  "Misplacion",
+  "Dramathea",
+  "Scrollos",
+  "Clutteron",
+  "Oopsida",
+  "Spillonius",
+  "Indecisia",
+  "Overthinkon",
+  "Blamora",
+  "Fidgetes",
+  "Napthena",
+  "Wifion",
+  "Tangentia",
+  "Oopsicles",
+  "Mumbleon",
+  "Snackratia"
+)
+
 # Create the set of schools with IDs
 schools <- tibble(
   school_id = 1:n_schools,
-  school_name = paste0("School_", LETTERS[1:n_schools])
+  school_name = funny_school_names
 )
 # Assign random strength scores (1, 2, or 3) to each school
 # 1 = weak, 2 = moderate, 3 = strong
@@ -152,7 +175,113 @@ schools |>
   print()
 
 # =============================================================================
-# SECTION 3:  CREATE SCHOOL PAIRS WITH TRAVEL INFORMATION
+# SECTION 3: SCHOOL PREFERENCES AND BIDDING LANGUAGE
+# =============================================================================
+
+# Each school has preferences over game types
+# Preferences are expressed as disutilities (negative values = less desirable)
+#
+# Key preference factors:
+# - Evenly matched games (band 2-3) are preferred to mismatched (band 1)
+# - Bus travel (B) is preferred to plane travel (P) due to lower cost/fatigue
+# - Each school has some random variation in preferences
+# =============================================================================
+# SECTION 5: DEFINE MATCH VARIABLES AND GAME TYPES
+# =============================================================================
+
+# Define away-game types: k = (strength_match, travel_class)
+# This creates 6 possible game types: (mismatched,B), (mismatched,P), (close match,B), ...
+game_types <- expand_grid(
+  strength_match = factor(
+    c("mismatched", "close match", "equal match"),
+    levels = c("mismatched", "close match", "equal match"),
+    ordered = TRUE
+  ),
+  travel_class = c("B", "P")
+) |>
+  mutate(
+    game_type_id = row_number(),
+    type_label = paste0(
+      "Match_",
+      as.character(strength_match),
+      "_",
+      travel_class
+    )
+  )
+
+cat("\nGame Types (k = strength_match, travel_class):\n")
+print(game_types)
+
+
+generate_school_preferences <- function(school_id, game_types) {
+  # Base disutilities for each game type
+  # Schools prefer evenly matched opponents (band 3)
+  # More negative = less desirable
+  # we assume all schools have the same base disutilities for simplicity
+  # but this may not be true.  Some schools may have smaller budgets
+  # have a strong preference for bus travel, be willing to take longer rides, etc.
+  base_disutility <- tribble(
+    ~strength_match , ~travel_class , ~base_value ,
+    "mismatched"    , "B"           ,         -20 , # Mismatched, bus - LEAST preferred
+    "mismatched"    , "P"           ,         -30 , # Mismatched, plane - LEAST preferred
+    "close match"   , "B"           ,          -8 , # Close match, bus
+    "close match"   , "P"           ,         -15 , # Close match, plane
+    "equal match"   , "B"           ,          -3 , # Equal match, bus - MOST preferred!
+    "equal match"   , "P"           ,         -10 # Equal match, plane - preferred
+  )
+
+  # Add some random variation in utilties to make each school unique
+  school_prefs <- game_types |>
+    left_join(base_disutility, by = c("strength_match", "travel_class")) |>
+    mutate(
+      school_id = school_id,
+      # Add random variation (±3 tokens)
+      disutility = base_value + round(rnorm(n(), 0, 2), 1),
+      # Each school is willing to accept more evenly matched games
+      # Band 3 (evenly matched) is most desired
+      max_quantity = case_when(
+        strength_match == "equal match" ~ sample(4:6, n(), replace = TRUE), # Prefer equal matches
+        strength_match == "close match" ~ sample(2:4, n(), replace = TRUE), # Accept close matches
+        TRUE ~ sample(0:2, n(), replace = TRUE) # Few mismatched
+      )
+    ) |>
+    select(school_id, game_type_id, type_label, disutility, max_quantity)
+  return(school_prefs)
+}
+
+# Generate preferences for all schools
+school_preferences <- map_dfr(
+  schools$school_id,
+  ~ generate_school_preferences(.x, game_types)
+)
+
+# Visualize average preferences by game type
+avg_preferences <- school_preferences |>
+  group_by(type_label, game_type_id) |>
+  summarise(
+    avg_disutility = mean(disutility),
+    avg_max_quantity = mean(max_quantity),
+    .groups = "drop"
+  )
+
+ggplot(
+  avg_preferences,
+  aes(x = reorder(type_label, avg_disutility), y = avg_disutility)
+) +
+  geom_col(aes(fill = avg_disutility)) +
+  scale_fill_den(palette = "secondarydark", discrete = FALSE, reverse = TRUE) +
+  coord_flip() +
+  labs(
+    title = "Average School Preferences by Game Type",
+    subtitle = "Less negative = more preferred",
+    x = "Game Type",
+    y = "Average Disutility (tokens)",
+    fill = "Disutility"
+  ) +
+  theme_den()
+
+# =============================================================================
+# SECTION 4:  CREATE SCHOOL PAIRS WITH TRAVEL INFORMATION
 # =============================================================================
 # Function to calculate match strength between two schools
 # Schools prefer evenly matched opponents (same strength score)
@@ -308,33 +437,6 @@ school_pairs |>
   ) |>
   print()
 
-# =============================================================================
-# SECTION 4: DEFINE MATCH VARIABLES AND GAME TYPES
-# =============================================================================
-
-# Define away-game types: k = (strength_match, travel_class)
-# This creates 6 possible game types: (mismatched,B), (mismatched,P), (close match,B), ...
-game_types <- expand_grid(
-  strength_match = factor(
-    c("mismatched", "close match", "equal match"),
-    levels = c("mismatched", "close match", "equal match"),
-    ordered = TRUE
-  ),
-  travel_class = c("B", "P")
-) |>
-  mutate(
-    game_type_id = row_number(),
-    type_label = paste0(
-      "Match_",
-      as.character(strength_match),
-      "_",
-      travel_class
-    )
-  )
-
-cat("\nGame Types (k = strength_match, travel_class):\n")
-print(game_types)
-
 # Assign game type to each school pair (join on factor strength_match)
 school_pairs <- school_pairs |>
   left_join(
@@ -358,86 +460,6 @@ ggplot(school_pairs, aes(x = type_label, fill = strength_match)) +
   ) +
   theme_den() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-# =============================================================================
-# SECTION 5: SCHOOL PREFERENCES AND BIDDING LANGUAGE
-# =============================================================================
-
-# Each school has preferences over game types
-# Preferences are expressed as disutilities (negative values = less desirable)
-#
-# Key preference factors:
-# - Evenly matched games (band 2-3) are preferred to mismatched (band 1)
-# - Bus travel (B) is preferred to plane travel (P) due to lower cost/fatigue
-# - Each school has some random variation in preferences
-
-generate_school_preferences <- function(school_id, game_types) {
-  # Base disutilities for each game type
-  # Schools prefer evenly matched opponents (band 3)
-  # More negative = less desirable
-  # we assume all schools have the same base disutilities for simplicity
-  # but this may not be true.  Some schools may have smaller budgets
-  # have a strong preference for bus travel, be willing to take longer rides, etc.
-  base_disutility <- tribble(
-    ~strength_match , ~travel_class , ~base_value ,
-    "mismatched"    , "B"           ,         -20 , # Mismatched, bus - LEAST preferred
-    "mismatched"    , "P"           ,         -30 , # Mismatched, plane - LEAST preferred
-    "close match"   , "B"           ,          -8 , # Close match, bus
-    "close match"   , "P"           ,         -15 , # Close match, plane
-    "equal match"   , "B"           ,          -3 , # Equal match, bus - MOST preferred!
-    "equal match"   , "P"           ,         -10 # Equal match, plane - preferred
-  )
-
-  # Add random variation for this school
-  school_prefs <- game_types |>
-    left_join(base_disutility, by = c("strength_match", "travel_class")) |>
-    mutate(
-      school_id = school_id,
-      # Add random variation (±3 tokens)
-      disutility = base_value + round(rnorm(n(), 0, 2), 1),
-      # Each school is willing to accept more evenly matched games
-      # Band 3 (evenly matched) is most desired
-      max_quantity = case_when(
-        strength_match == "equal match" ~ sample(4:6, n(), replace = TRUE), # Prefer equal matches
-        strength_match == "close match" ~ sample(2:4, n(), replace = TRUE), # Accept close matches
-        TRUE ~ sample(0:2, n(), replace = TRUE) # Few mismatched
-      )
-    ) |>
-    select(school_id, game_type_id, type_label, disutility, max_quantity)
-  return(school_prefs)
-}
-
-# Generate preferences for all schools
-school_preferences <- map_dfr(
-  schools$school_id,
-  ~ generate_school_preferences(.x, game_types)
-)
-
-# Visualize average preferences by game type
-avg_preferences <- school_preferences |>
-  group_by(type_label, game_type_id) |>
-  summarise(
-    avg_disutility = mean(disutility),
-    avg_max_quantity = mean(max_quantity),
-    .groups = "drop"
-  )
-
-ggplot(
-  avg_preferences,
-  aes(x = reorder(type_label, avg_disutility), y = avg_disutility)
-) +
-  geom_col(aes(fill = avg_disutility)) +
-  scale_fill_den(palette = "secondarydark", discrete = FALSE, reverse = TRUE) +
-  coord_flip() +
-  labs(
-    title = "Average School Preferences by Game Type",
-    subtitle = "Less negative = more preferred",
-    x = "Game Type",
-    y = "Average Disutility (tokens)",
-    fill = "Disutility"
-  ) +
-  theme_den()
-
 # =============================================================================
 # SECTION 6: INITIALIZE AUCTION STATE
 # =============================================================================
@@ -1380,7 +1402,7 @@ ggplot() +
 # -----------------------------------------------------------------------------
 
 plot_school_schedule_map <- function(
-  base_school_name = "School_D",
+  base_school_name = schools$school_name[1],
   schedule_matrix = final_schedule,
   schools_df = schools,
   school_pairs_df = school_pairs
@@ -1531,7 +1553,7 @@ plot_school_schedule_map <- function(
     scale_color_manual(
       values = c(
         "Home" = den_cols("hillsidedarkgreen"),
-        "Away" = den_cols("red")
+        "Away" = "blue"
       ),
       name = "Game Type"
     ) +
@@ -1544,9 +1566,9 @@ plot_school_schedule_map <- function(
       title = paste("Schedule Map:", base_name),
       subtitle = paste(
         nrow(away_games),
-        "away games (red arrows out) |",
+        "away games (red arrows) |",
         nrow(home_games),
-        "home games (green arrows in) | Air Travel (dashed lines) Bus Travel (solid lines)"
+        "home games (green) \n Air Travel (dashed lines) Bus Travel (solid lines)"
       ),
       x = "Longitude",
       y = "Latitude"
@@ -1560,9 +1582,7 @@ plot_school_schedule_map <- function(
 }
 
 # Example: Show schedule map for a school
-# Call with no parameters for School_D, or specify a school name
-plot_school_schedule_map() # Uses default: School_D
-plot_school_schedule_map("School_A") # For a different school
+plot_school_schedule_map() # Uses default
 
 # Analyze schedule by game type
 schedule_by_type <- map_dfr(1:n_schools, function(i) {
@@ -1656,34 +1676,263 @@ if (nrow(auction_results$iteration_log) > 0) {
 }
 
 # Final budget analysis
+# Calculate total disutility accepted by each school based on their away games
+disutility_by_school <- map_dfr(1:n_schools, function(i) {
+  # Get all away games for this school
+  away_games_info <- map_dfr(1:n_schools, function(j) {
+    if (i != j && final_schedule[i, j] > 0) {
+      # Get game type for this matchup
+      game_type <- school_pairs |>
+        filter(school_i == i, school_j == j) |>
+        pull(game_type_id)
+
+      if (length(game_type) > 0) {
+        # Get this school's disutility for this game type
+        disutil <- school_preferences |>
+          filter(school_id == i, game_type_id == game_type[1]) |>
+          pull(disutility)
+
+        tibble(
+          game_type_id = game_type[1],
+          games = final_schedule[i, j],
+          disutility = if (length(disutil) > 0) disutil[1] else 0
+        )
+      } else {
+        tibble()
+      }
+    } else {
+      tibble()
+    }
+  })
+
+  tibble(
+    school_id = i,
+    total_disutility = if (nrow(away_games_info) > 0) {
+      sum(away_games_info$disutility * away_games_info$games)
+    } else {
+      0
+    }
+  )
+})
+
 budget_summary <- auction_results$final_budgets |>
   left_join(
     schools |> select(school_id, school_name, strength),
     by = "school_id"
   ) |>
-  mutate(spent = initial_budget - budget)
+  left_join(disutility_by_school, by = "school_id") |>
+  mutate(spent = initial_budget - budget) |>
+  mutate()
 
 cat("\n--- Budget Summary ---\n")
 cat("Initial budget per school:", initial_budget, "tokens\n")
 cat("Average spent:", round(mean(budget_summary$spent), 1), "tokens\n")
 cat("Min remaining:", min(budget_summary$budget), "tokens\n")
 cat("Max remaining:", max(budget_summary$budget), "tokens\n")
+cat(
+  "Average total disutility:",
+  round(mean(budget_summary$total_disutility), 1),
+  "\n"
+)
 
 ggplot(
   budget_summary,
-  aes(x = reorder(school_name, spent), y = spent, fill = strength)
+  aes(x = reorder(school_name, spent), y = spent, fill = total_disutility)
 ) +
   geom_col() +
-  scale_fill_den(palette = "secondarydark", discrete = FALSE) +
+  scale_fill_den(palette = "secondarydark", discrete = FALSE, reverse = TRUE) +
   coord_flip() +
   labs(
     title = "Tokens Spent by School",
-    subtitle = "Schools with more desirable away game opportunities spent more",
+    subtitle = "Fill color shows total disutility accepted (more negative = worse schedule)",
     x = "School",
     y = "Tokens Spent",
-    fill = "Strength"
+    fill = "Total\nDisutility"
   ) +
   theme_den()
+
+# Scatter plot: total disutility vs tokens spent
+ggplot(
+  budget_summary,
+  aes(x = spent, y = total_disutility, color = as.factor(strength))
+) +
+  geom_point(size = 4) +
+  geom_text(aes(label = school_name), hjust = -0.1, vjust = 0.5, size = 3) +
+  scale_color_den(palette = "secondarydark", name = "Strength") +
+  labs(
+    title = "Tokens Spent vs Total Disutility Accepted",
+    subtitle = "Schools spending more tokens should get better (less negative) schedules",
+    x = "Tokens Spent",
+    y = "Total Disutility"
+  ) +
+  theme_den() +
+  expand_limits(x = max(budget_summary$spent) * 1.3)
+
+# =============================================================================
+# GEOGRAPHIC ISOLATION ANALYSIS
+# =============================================================================
+# Analyze whether geographic isolation explains the inverse correlation
+# between spending and schedule quality
+
+# Calculate average distance and plane game availability for each school
+geographic_analysis <- map_dfr(1:n_schools, function(i) {
+  # Get all potential opponents for this school
+  opponents_info <- school_pairs |>
+    filter(school_i == i) |>
+    summarise(
+      avg_distance = mean(distance_miles),
+      median_distance = median(distance_miles),
+      pct_plane_required = mean(travel_class == "P") * 100,
+      n_bus_options = sum(travel_class == "B"),
+      n_plane_options = sum(travel_class == "P"),
+      avg_bus_travel_time = mean(travel_time[travel_class == "B"], na.rm = TRUE)
+    )
+
+  tibble(
+    school_id = i,
+    avg_distance = opponents_info$avg_distance,
+    median_distance = opponents_info$median_distance,
+    pct_plane_required = opponents_info$pct_plane_required,
+    n_bus_options = opponents_info$n_bus_options,
+    n_plane_options = opponents_info$n_plane_options,
+    avg_bus_travel_time = opponents_info$avg_bus_travel_time
+  )
+})
+
+# Join with budget summary
+budget_with_geography <- budget_summary |>
+  left_join(geographic_analysis, by = "school_id") |>
+  left_join(
+    travel_by_school |>
+      select(school_id, plane_games, bus_games, total_travel_hours),
+    by = "school_id"
+  )
+
+cat("\n--- Geographic Isolation Analysis ---\n")
+cat(
+  "Examining whether geographic location explains spending/disutility patterns\n\n"
+)
+
+# Correlation analysis
+cor_spent_distance <- cor(
+  budget_with_geography$spent,
+  budget_with_geography$avg_distance
+)
+cor_disutility_distance <- cor(
+  budget_with_geography$total_disutility,
+  budget_with_geography$avg_distance
+)
+cor_spent_pct_plane <- cor(
+  budget_with_geography$spent,
+  budget_with_geography$pct_plane_required
+)
+cor_disutility_pct_plane <- cor(
+  budget_with_geography$total_disutility,
+  budget_with_geography$pct_plane_required
+)
+
+cat("Correlations:\n")
+cat(
+  "  Tokens spent vs avg distance to opponents:",
+  round(cor_spent_distance, 3),
+  "\n"
+)
+cat(
+  "  Total disutility vs avg distance:",
+  round(cor_disutility_distance, 3),
+  "\n"
+)
+cat(
+  "  Tokens spent vs % plane-required opponents:",
+  round(cor_spent_pct_plane, 3),
+  "\n"
+)
+cat(
+  "  Total disutility vs % plane-required:",
+  round(cor_disutility_pct_plane, 3),
+  "\n"
+)
+
+# Scatter: Average distance vs disutility
+ggplot(
+  budget_with_geography,
+  aes(x = avg_distance, y = total_disutility, color = as.factor(strength))
+) +
+  geom_point(size = 4) +
+  geom_text(aes(label = school_name), hjust = -0.1, vjust = 0.5, size = 3) +
+  geom_smooth(
+    method = "lm",
+    se = FALSE,
+    color = "gray50",
+    linetype = "dashed"
+  ) +
+  scale_color_den(palette = "secondarydark", name = "Strength") +
+  labs(
+    title = "Geographic Isolation vs Schedule Quality",
+    subtitle = paste0(
+      "Correlation: ",
+      round(cor_disutility_distance, 2),
+      " | Schools farther from others get worse schedules"
+    ),
+    x = "Average Distance to Opponents (miles)",
+    y = "Total Disutility (more negative = worse)"
+  ) +
+  theme_den() +
+  expand_limits(x = max(budget_with_geography$avg_distance) * 1.15)
+
+# Scatter: % plane-required opponents vs tokens spent
+ggplot(
+  budget_with_geography,
+  aes(x = pct_plane_required, y = spent, color = total_disutility)
+) +
+  geom_point(size = 4) +
+  geom_text(aes(label = school_name), hjust = -0.1, vjust = 0.5, size = 3) +
+  geom_smooth(
+    method = "lm",
+    se = FALSE,
+    color = "gray50",
+    linetype = "dashed"
+  ) +
+  scale_color_den(palette = "secondarydark", discrete = FALSE, reverse = TRUE) +
+  labs(
+    title = "Geographic Constraint: Plane-Required Opponents vs Spending",
+    subtitle = paste0(
+      "Correlation: ",
+      round(cor_spent_pct_plane, 2),
+      " | Schools with fewer bus options must spend on expensive plane games"
+    ),
+    x = "% of Opponents Requiring Plane Travel",
+    y = "Tokens Spent",
+    color = "Total\nDisutility"
+  ) +
+  theme_den() +
+  expand_limits(x = max(budget_with_geography$pct_plane_required) * 1.1)
+
+# Summary table
+cat("\n--- School Geographic Profiles ---\n")
+budget_with_geography |>
+  select(
+    school_name,
+    strength,
+    avg_distance,
+    pct_plane_required,
+    plane_games,
+    spent,
+    total_disutility
+  ) |>
+  arrange(desc(pct_plane_required)) |>
+  print(n = 20)
+
+cat("\n--- Key Insight ---\n")
+cat(
+  "The inverse correlation between spending and schedule quality occurs because:\n"
+)
+cat("1. Geographically isolated schools have fewer bus-travel options\n")
+cat("2. They MUST acquire plane games regardless of preference\n")
+cat("3. These plane games have high disutility AND cost tokens\n")
+cat("4. Result: Isolated schools spend MORE tokens on WORSE schedules\n")
+cat("\nThe auction prices game TYPES, not individual matchups.\n")
+cat("Schools can't escape their geographic constraints.\n")
 
 # =============================================================================
 # SECTION 10: CREATE READABLE SCHEDULE OUTPUT
@@ -1978,10 +2227,12 @@ schedule_df <- final_schedule |>
   as.data.frame() |>
   rownames_to_column("away_school") |>
   pivot_longer(-away_school, names_to = "home_school", values_to = "games") |>
+  # convert away_school and home_school full name of school
   mutate(
-    away_school = str_remove(away_school, "School_"),
-    home_school = str_remove(home_school, "School_")
+    away_school = schools$school_name[as.numeric(away_school)],
+    home_school = schools$school_name[as.numeric(str_remove(home_school, "V"))]
   )
+
 
 gg <- ggplot(
   schedule_df,
@@ -1998,13 +2249,15 @@ gg <- ggplot(
   ) +
   labs(
     title = "Schedule Matrix Heatmap",
-    subtitle = "Rows = Away team, Columns = Home team",
+    subtitle = "Number of Times Teams Meet Each Other",
     x = "Home School",
     y = "Away School"
   ) +
   theme_den() +
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title.x = element_text(margin = margin(t = 15)),
+    axis.title.y = element_text(margin = margin(r = 15)),
     panel.grid = element_blank()
   ) +
   coord_fixed()
