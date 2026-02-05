@@ -169,10 +169,6 @@ ggplot(schools, aes(x = lon, y = lat)) +
   coord_fixed(ratio = 1.3) + # Approximate aspect ratio for US map
   expand_limits(x = c(-85, -65), y = c(25, 50))
 
-cat("\nSchool locations:\n")
-schools |>
-  select(school_name, strength, lat, lon) |>
-  print()
 
 # =============================================================================
 # SECTION 3: SCHOOL PREFERENCES AND BIDDING LANGUAGE
