@@ -21,10 +21,12 @@ if (!require(denisonbrand)) {
   library(denisonbrand)
 }
 library(lpSolve)
+library(maps)
+library(leaflet)
 denisonbrand::load_fonts()
 
 # Set seed for reproducibility
-# set.seed(42)
+set.seed(42)
 
 # =============================================================================
 # SECTION 1: AGENTS AND SEASON PARAMETERS
@@ -101,32 +103,45 @@ funny_school_names <- c(
   "Snackratia"
 )
 
-# Create the set of schools with IDs
+# Create schools with IDs and random strength scores
+# Coordinates restricted to eastern US (east of -90 longitude) and on land
+# Function to check if a point is on land in the US
+# Get US map data
+# Generate valid land coordinates
+
+generate_land_coordinates <- function(
+  n,
+  lat_range = c(32, 45),
+  lon_range = c(-90, -70)
+) {
+  coords <- tibble(lat = numeric(0), lon = numeric(0))
+
+  while (nrow(coords) < n) {
+    # Generate candidate points
+    candidates <- tibble(
+      lat = runif(n * 10, lat_range[1], lat_range[2]),
+      lon = runif(n * 10, lon_range[1], lon_range[2])
+    )
+
+    # Filter to only USA points
+    on_land <- map.where(x = candidates$lon, y = candidates$lat) == "USA"
+    candidates <- candidates[on_land, ] |> filter(!is.na(lat))
+
+    coords <- bind_rows(coords, candidates)[1:n, ]
+  }
+  return(coords)
+}
+
+land_coords <- generate_land_coordinates(n_schools)
+
 schools <- tibble(
   school_id = 1:n_schools,
-  school_name = funny_school_names
-)
-# Assign random strength scores (1, 2, or 3) to each school
-# 1 = weak, 2 = moderate, 3 = strong
-schools <- schools |>
-  mutate(
-    # Strength score: randomly assigned 1, 2, or 3
-    strength = sample(1:3, n_schools, replace = TRUE)
-  ) |>
+  school_name = funny_school_names,
+  strength = sample(1:3, n_schools, replace = TRUE),
+  lat = land_coords$lat,
+  lon = land_coords$lon
+) |>
   arrange(desc(strength))
-
-# Visualize the distribution of school strengths
-ggplot(schools, aes(x = reorder(school_name, strength), y = strength)) +
-  geom_col(aes(fill = as.factor(strength))) +
-  scale_fill_den(palette = "secondarydark", name = "Strength") +
-  coord_flip() +
-  labs(
-    title = "School Strength Scores",
-    subtitle = "Randomly assigned: 1 = weak, 2 = moderate, 3 = strong",
-    x = "School",
-    y = "Strength Score"
-  ) +
-  theme_den()
 
 cat("\nStrength score distribution:\n")
 schools |>
@@ -140,34 +155,51 @@ schools |>
   ) |>
   print()
 
-# Generate geographic locations for schools (using random coordinates)
-# Coordinates represent approximate positions on a map (e.g., US colleges)
-schools <- schools |>
-  mutate(
-    # Latitude and longitude (simplified grid representing eastern continental US)
-    lat = runif(n_schools, min = 30, max = 45),
-    lon = runif(n_schools, min = -80, max = -70)
-  )
+# Get US state boundaries for eastern states
+states_map <- map_data("state") |>
+  filter(long >= -92 & long <= -66)
 
-# Visualize school locations on a map grid
-ggplot(schools, aes(x = lon, y = lat)) +
-  geom_point(aes(color = as.factor(strength), size = 3)) +
-  geom_text(aes(label = school_name), hjust = -0.1, vjust = 0.5, size = 3) +
-  scale_color_den(palette = "secondarydark", name = "Strength") +
-  guides(size = "none") +
+# Visualize school locations on a map with state boundaries
+ggplot() +
+  geom_polygon(
+    data = states_map,
+    aes(x = long, y = lat, group = group),
+    fill = "white",
+    color = "gray70",
+    linewidth = 0.3
+  ) +
+  geom_point(
+    data = schools,
+    aes(x = lon, y = lat, color = as.factor(strength)),
+    size = 4
+  ) +
+  geom_text(
+    data = schools,
+    aes(x = lon, y = lat, label = school_name),
+    hjust = -0.1,
+    vjust = 0.5,
+    size = 3
+  ) +
+  scale_color_den(
+    palette = "secondarydark",
+    name = "Strength",
+    labels = c("1 (Weak)", "2 (Moderate)", "3 (Strong)")
+  ) +
   labs(
     title = "School Locations",
-    subtitle = "Geographic distribution of conference schools",
-    x = "Longitude",
-    y = "Latitude"
+    subtitle = "Geographic distribution of conference schools in auction",
+    x = NULL,
+    y = NULL
   ) +
   theme_den() +
   theme(
-    panel.grid.major = element_line(color = "gray80"),
-    panel.grid.minor = element_line(color = "gray90")
+    panel.grid.major = element_line(color = "gray90"),
+    panel.grid.minor = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.background = element_rect(fill = "lightblue")
   ) +
-  coord_fixed(ratio = 1.3) + # Approximate aspect ratio for US map
-  expand_limits(x = c(-85, -65), y = c(25, 50))
+  coord_fixed(ratio = 1.3, xlim = c(-92, -68), ylim = c(30, 47))
 
 
 # =============================================================================
@@ -186,14 +218,14 @@ ggplot(schools, aes(x = lon, y = lat)) +
 # =============================================================================
 
 # Define away-game types: k = (strength_match, travel_class)
-# This creates 6 possible game types: (mismatched,B), (mismatched,P), (close match,B), ...
+# This creates 6 possible game types: (mismatched,Bus), (mismatched,Fly), (close match,Bus), ...
 game_types <- expand_grid(
   strength_match = factor(
     c("mismatched", "close match", "equal match"),
     levels = c("mismatched", "close match", "equal match"),
     ordered = TRUE
   ),
-  travel_class = c("B", "P")
+  travel_class = c("Bus", "Fly")
 ) |>
   mutate(
     game_type_id = row_number(),
@@ -218,12 +250,12 @@ generate_school_preferences <- function(school_id, game_types) {
   # have a strong preference for bus travel, be willing to take longer rides, etc.
   base_disutility <- tribble(
     ~strength_match , ~travel_class , ~base_value ,
-    "mismatched"    , "B"           ,         -20 , # Mismatched, bus - LEAST preferred
-    "mismatched"    , "P"           ,         -30 , # Mismatched, plane - LEAST preferred
-    "close match"   , "B"           ,          -8 , # Close match, bus
-    "close match"   , "P"           ,         -15 , # Close match, plane
-    "equal match"   , "B"           ,          -3 , # Equal match, bus - MOST preferred!
-    "equal match"   , "P"           ,         -10 # Equal match, plane - preferred
+    "mismatched"    , "Bus"         ,         -20 , # Mismatched, bus - LEAST preferred
+    "mismatched"    , "Fly"         ,         -30 , # Mismatched, plane - LEAST preferred
+    "close match"   , "Bus"         ,          -8 , # Close match, bus
+    "close match"   , "Fly"         ,         -15 , # Close match, plane
+    "equal match"   , "Bus"         ,          -3 , # Equal match, bus - MOST preferred!
+    "equal match"   , "Fly"         ,         -10 # Equal match, plane - preferred
   )
 
   # Add some random variation in utilties to make each school unique
@@ -395,12 +427,20 @@ school_pairs <- school_pairs |>
   mutate(
     # Calculate bus travel time based on distance
     bus_travel_time = calculate_bus_travel_time(distance_miles),
-    # Travel class: B = Bus (<=5 hours by bus), P = Plane (>5 hours by bus)
-    travel_class = if_else(bus_travel_time <= 5, "B", "P"),
+    # Travel class: Bus (<=5 hours by bus), Fly (>5 hours by bus)
+    travel_class = if_else(bus_travel_time <= 5, "Bus", "Fly"),
     # Actual travel time: bus time for bus trips, constant for plane trips
-    travel_time = calculate_actual_travel_time(bus_travel_time, travel_class),
+    travel_time = if_else(
+      travel_class == "Bus",
+      bus_travel_time,
+      plane_travel_time
+    ),
     # Travel cost: fixed costs based on travel class
-    travel_cost = calculate_travel_cost(travel_class)
+    travel_cost = if_else(
+      travel_class == "Bus",
+      bus_travel_cost,
+      plane_travel_cost
+    )
   )
 
 # Visualize travel time distribution
@@ -408,10 +448,10 @@ ggplot(school_pairs, aes(x = travel_time, fill = travel_class)) +
   geom_histogram(binwidth = 0.5, color = "white") +
   scale_fill_manual(
     values = c(
-      "B" = den_cols("hillsidedarkgreen"),
-      "P" = den_cols("granvilledarkblue")
+      "Bus" = den_cols("hillsidedarkgreen"),
+      "Fly" = den_cols("granvilledarkblue")
     ),
-    labels = c("B" = "Bus (≤5 hrs)", "P" = "Plane (>5 hrs)")
+    labels = c("Bus" = "Bus (≤5 hrs)", "Fly" = "Plane (>5 hrs)")
   ) +
   labs(
     title = "Distribution of Travel Times Between Schools",
@@ -427,8 +467,8 @@ school_pairs |>
   count(travel_class) |>
   mutate(
     class_description = case_when(
-      travel_class == "B" ~ "Bus (≤5 hours)",
-      travel_class == "P" ~ "Plane (>5 hours)"
+      travel_class == "Bus" ~ "Bus (≤5 hours)",
+      travel_class == "Fly" ~ "Plane (>5 hours)"
     )
   ) |>
   print()
@@ -810,7 +850,8 @@ run_auction <- function(
   max_iterations = 100,
   price_increment = 2,
   games_per_round = 20, # Limit games per iteration to create scarcity
-  verbose = TRUE
+  verbose = TRUE,
+  capture_snapshots = FALSE # Capture schedule snapshots for animation
 ) {
   # Reset auction state
   current_prices <- game_types |> mutate(price = 0)
@@ -818,6 +859,9 @@ run_auction <- function(
   current_schedule <- matrix(0, nrow = n_schools, ncol = n_schools)
 
   iteration_log <- tibble()
+
+  # List to store schedule snapshots at each iteration (if capture_snapshots = TRUE)
+  schedule_snapshots <- if (capture_snapshots) list(current_schedule) else NULL
 
   for (iter in 1:max_iterations) {
     if (verbose && iter %% 10 == 1) {
@@ -863,6 +907,11 @@ run_auction <- function(
     )
 
     games_scheduled_this_round <- sum(current_schedule) - sum(previous_schedule)
+
+    # Store snapshot after this iteration (if capturing)
+    if (capture_snapshots) {
+      schedule_snapshots[[length(schedule_snapshots) + 1]] <- current_schedule
+    }
 
     # Update budgets based on new games scheduled
     for (i in 1:n_schools) {
@@ -1022,6 +1071,12 @@ run_auction <- function(
 
         # If we made progress with strict constraint, don't relax further
         if (sum(current_schedule) > games_before_greedy) {
+          # Store snapshot after greedy fill progress
+          if (capture_snapshots) {
+            schedule_snapshots[[
+              length(schedule_snapshots) + 1
+            ]] <- current_schedule
+          }
           break
         }
       }
@@ -1045,13 +1100,246 @@ run_auction <- function(
     }
   }
 
+  # Final greedy fill to ensure all schools have exactly 12 games
+  # This runs after the auction loop to guarantee the hard constraint
+  game_counts <- count_school_games(current_schedule)
+  max_attempts <- 100
+  attempt <- 0
+
+  while (
+    !all(game_counts$total_games == total_games) && attempt < max_attempts
+  ) {
+    attempt <- attempt + 1
+    made_progress <- FALSE
+
+    # Find schools that need more games
+    schools_needing_away <- which(game_counts$away_games < exact_away_games)
+    schools_needing_home <- which(game_counts$home_games < exact_home_games)
+
+    # Try to match schools needing away games with schools needing home games
+    for (i in schools_needing_away) {
+      if (game_counts$away_games[i] >= exact_away_games) {
+        next
+      }
+
+      for (j in schools_needing_home) {
+        if (i == j) {
+          next
+        }
+        if (game_counts$home_games[j] >= exact_home_games) {
+          next
+        }
+
+        # Check pairwise constraint (allow up to 2 meetings if necessary)
+        meetings <- current_schedule[i, j] + current_schedule[j, i]
+        if (meetings >= 2) {
+          next
+        }
+
+        # Schedule the game
+        current_schedule[i, j] <- current_schedule[i, j] + 1
+        game_counts <- count_school_games(current_schedule)
+        made_progress <- TRUE
+
+        if (game_counts$away_games[i] >= exact_away_games) break
+      }
+    }
+
+    if (!made_progress) {
+      # If no progress with standard matching, allow any valid pairing
+      for (i in 1:n_schools) {
+        if (game_counts$away_games[i] >= exact_away_games) {
+          next
+        }
+
+        for (j in 1:n_schools) {
+          if (i == j) {
+            next
+          }
+          if (game_counts$home_games[j] >= exact_home_games) {
+            next
+          }
+
+          meetings <- current_schedule[i, j] + current_schedule[j, i]
+          if (meetings >= 2) {
+            next
+          }
+
+          current_schedule[i, j] <- current_schedule[i, j] + 1
+          game_counts <- count_school_games(current_schedule)
+          made_progress <- TRUE
+          break
+        }
+        if (made_progress) break
+      }
+    }
+
+    if (!made_progress) break
+  }
+
+  # Swap-based repair for remaining imbalances
+  # When greedy fill can't make progress because all other schools are at capacity,
+  # we swap games: cancel X @ Y, add X @ needing_home, add needing_away @ Y
+  game_counts <- count_school_games(current_schedule)
+  pairwise <- current_schedule + t(current_schedule)
+
+  max_swap_attempts <- 50
+  swap_attempt <- 0
+
+  while (
+    !all(game_counts$total_games == total_games) &&
+      swap_attempt < max_swap_attempts
+  ) {
+    swap_attempt <- swap_attempt + 1
+    made_progress <- FALSE
+
+    schools_needing_home <- which(game_counts$home_games < exact_home_games)
+    schools_needing_away <- which(game_counts$away_games < exact_away_games)
+
+    if (
+      length(schools_needing_home) == 0 || length(schools_needing_away) == 0
+    ) {
+      break
+    }
+
+    need_home <- schools_needing_home[1]
+    need_away <- schools_needing_away[1]
+
+    # Find a swap: X @ Y where X can visit need_home and need_away can visit Y
+    for (x in 1:n_schools) {
+      if (x == need_home || x == need_away) {
+        next
+      }
+      if (pairwise[x, need_home] >= 2) {
+        next
+      } # X can't play need_home anymore
+
+      for (y in 1:n_schools) {
+        if (y == x || y == need_home || y == need_away) {
+          next
+        }
+        if (current_schedule[x, y] == 0) {
+          next
+        } # No game to cancel
+        if (pairwise[need_away, y] >= 2) {
+          next
+        } # need_away can't play Y anymore
+
+        # Perform swap
+        current_schedule[x, y] <- current_schedule[x, y] - 1
+        current_schedule[x, need_home] <- current_schedule[x, need_home] + 1
+        current_schedule[need_away, y] <- current_schedule[need_away, y] + 1
+
+        game_counts <- count_school_games(current_schedule)
+        pairwise <- current_schedule + t(current_schedule)
+        made_progress <- TRUE
+        break
+      }
+      if (made_progress) break
+    }
+
+    if (!made_progress) break
+  }
+
+  # Store final schedule snapshot (if capturing)
+  if (capture_snapshots) {
+    schedule_snapshots[[length(schedule_snapshots) + 1]] <- current_schedule
+  }
+
+  # ---------------------------------------------------------------------------
+  # Final Constraint Verification
+  # ---------------------------------------------------------------------------
+  game_counts <- count_school_games(current_schedule)
+  pairwise_meetings <- current_schedule + t(current_schedule)
+
+  # Check all constraints
+  constraints_satisfied <- list(
+    # (a) Each school plays exactly total_games
+    total_games_ok = all(game_counts$total_games == total_games),
+    total_games_min = min(game_counts$total_games),
+    total_games_max = max(game_counts$total_games),
+
+    # (b) Each school has exactly exact_home_games home games
+    home_games_ok = all(game_counts$home_games == exact_home_games),
+    home_games_min = min(game_counts$home_games),
+    home_games_max = max(game_counts$home_games),
+
+    # (c) Each school has exactly exact_away_games away games
+    away_games_ok = all(game_counts$away_games == exact_away_games),
+    away_games_min = min(game_counts$away_games),
+    away_games_max = max(game_counts$away_games),
+
+    # (d) Pairwise constraint: each pair meets at most once (ideally)
+    pairwise_max_1_ok = all(pairwise_meetings <= 1),
+    pairwise_max = max(pairwise_meetings),
+    n_pairs_meeting_twice = sum(pairwise_meetings > 1) / 2 # Divide by 2 for symmetric matrix
+  )
+
+  constraints_satisfied$all_ok <- constraints_satisfied$total_games_ok &&
+    constraints_satisfied$home_games_ok &&
+    constraints_satisfied$away_games_ok &&
+    constraints_satisfied$pairwise_max_1_ok
+
+  if (verbose) {
+    cat("\n--- Final Constraint Check ---\n")
+    cat(
+      "Total games per school (target:",
+      total_games,
+      "):",
+      ifelse(constraints_satisfied$total_games_ok, "PASS", "FAIL"),
+      "[min:",
+      constraints_satisfied$total_games_min,
+      ", max:",
+      constraints_satisfied$total_games_max,
+      "]\n"
+    )
+    cat(
+      "Home games per school (target:",
+      exact_home_games,
+      "):",
+      ifelse(constraints_satisfied$home_games_ok, "PASS", "FAIL"),
+      "[min:",
+      constraints_satisfied$home_games_min,
+      ", max:",
+      constraints_satisfied$home_games_max,
+      "]\n"
+    )
+    cat(
+      "Away games per school (target:",
+      exact_away_games,
+      "):",
+      ifelse(constraints_satisfied$away_games_ok, "PASS", "FAIL"),
+      "[min:",
+      constraints_satisfied$away_games_min,
+      ", max:",
+      constraints_satisfied$away_games_max,
+      "]\n"
+    )
+    cat(
+      "Pairwise meetings <= 1:",
+      ifelse(constraints_satisfied$pairwise_max_1_ok, "PASS", "FAIL"),
+      "[max:",
+      constraints_satisfied$pairwise_max,
+      ", pairs meeting twice:",
+      constraints_satisfied$n_pairs_meeting_twice,
+      "]\n"
+    )
+    cat(
+      "ALL CONSTRAINTS:",
+      ifelse(constraints_satisfied$all_ok, "SATISFIED", "VIOLATED"),
+      "\n"
+    )
+  }
+
   # Return results
   list(
     schedule = current_schedule,
     final_prices = current_prices,
     final_budgets = current_budgets,
     iteration_log = iteration_log,
-    iterations_used = iter
+    iterations_used = iter,
+    schedule_snapshots = schedule_snapshots,
+    constraints_satisfied = constraints_satisfied
   )
 }
 
@@ -1065,8 +1353,147 @@ auction_results <- run_auction(
   max_iterations = 100,
   price_increment = 2,
   games_per_round = 20, # Limit games per round to create scarcity
-  verbose = TRUE
+  verbose = TRUE,
+  capture_snapshots = TRUE # Capture snapshots for animation
 )
+
+# =============================================================================
+# SECTION 8B: CREATE SCHEDULE BUILDING ANIMATION (GIF)
+# =============================================================================
+
+# Function to create a heatmap from a schedule matrix
+create_schedule_heatmap <- function(schedule_matrix, iteration_num) {
+  # Convert matrix to dataframe
+  # Row names may be "School_1", "1", or missing; column names become "V1", "V2", etc.
+  schedule_df <- schedule_matrix |>
+    as.data.frame() |>
+    rownames_to_column("away_school") |>
+    pivot_longer(-away_school, names_to = "home_school", values_to = "games") |>
+    mutate(
+      # Extract numeric index, handling various formats
+      away_idx = as.numeric(gsub("[^0-9]", "", away_school)),
+      home_idx = as.numeric(gsub("[^0-9]", "", home_school)),
+      # Handle case where row names are just "1", "2", etc. (no prefix)
+      away_idx = if_else(is.na(away_idx), row_number() %% n_schools, away_idx),
+      away_idx = if_else(away_idx == 0, n_schools, away_idx),
+      away_school = schools$school_name[away_idx],
+      home_school = schools$school_name[home_idx]
+    ) |>
+    select(-away_idx, -home_idx)
+
+  current_games <- sum(schedule_matrix)
+  target_games <- n_schools * exact_away_games # Total games needed
+
+  ggplot(
+    schedule_df,
+    aes(x = home_school, y = away_school, fill = factor(games))
+  ) +
+    geom_tile(color = "white") +
+    scale_fill_manual(
+      values = c(
+        "0" = den_cols("neutralcoolgray"),
+        "1" = den_cols("granvilledarkblue"),
+        "2" = "blue"
+      ),
+      name = "Games",
+      drop = FALSE
+    ) +
+    labs(
+      title = paste0("Schedule Building: Auction Round ", iteration_num),
+      subtitle = paste0(
+        "Games Scheduled: ",
+        current_games,
+        " / ",
+        target_games
+      ),
+      x = "Home School",
+      y = "Away School"
+    ) +
+    theme_den() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+      axis.text.y = element_text(size = 8),
+      axis.title.x = element_text(margin = margin(t = 15)),
+      axis.title.y = element_text(margin = margin(r = 15)),
+      panel.grid = element_blank(),
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 11)
+    ) +
+    coord_fixed()
+}
+
+# Generate heatmap plots for each snapshot (if snapshots were captured)
+if (!is.null(auction_results$schedule_snapshots)) {
+  cat("\nGenerating schedule animation...\n")
+
+  # Generate heatmap plots, skipping duplicate consecutive snapshots
+  heatmap_plots <- list()
+  frame_num <- 0
+  prev_snapshot <- NULL
+
+  for (i in seq_along(auction_results$schedule_snapshots)) {
+    current_snapshot <- auction_results$schedule_snapshots[[i]]
+
+    # Skip if identical to previous snapshot
+    if (!is.null(prev_snapshot) && identical(current_snapshot, prev_snapshot)) {
+      next
+    }
+
+    frame_num <- frame_num + 1
+    heatmap_plots[[frame_num]] <- create_schedule_heatmap(
+      current_snapshot,
+      iteration_num = i - 1 # Start from 0 (initial state)
+    )
+    prev_snapshot <- current_snapshot
+  }
+
+  cat(
+    "Generated",
+    length(heatmap_plots),
+    "unique heatmap frames",
+    "(skipped",
+    length(auction_results$schedule_snapshots) - length(heatmap_plots),
+    "duplicates).\n"
+  )
+
+  # Create GIF animation using gifski
+  if (!require(gifski, quietly = TRUE)) {
+    install.packages("gifski")
+    library(gifski)
+  }
+
+  # Create temporary directory for PNG files
+  temp_dir <- tempdir()
+  png_files <- character(length(heatmap_plots))
+
+  cat("Saving PNG frames...\n")
+  for (i in seq_along(heatmap_plots)) {
+    png_files[i] <- file.path(temp_dir, sprintf("frame_%03d.png", i))
+    ggsave(
+      png_files[i],
+      heatmap_plots[[i]],
+      width = 10,
+      height = 9,
+      dpi = 150,
+      bg = "white"
+    )
+  }
+
+  # Create GIF
+  output_gif <- "schedule_animation.gif"
+
+  gifski(
+    png_files = png_files,
+    gif_file = output_gif,
+    width = 1500,
+    height = 1350,
+    delay = 0.5 # 0.5 seconds per frame
+  )
+
+  cat("\nGIF animation saved to:", output_gif, "\n")
+  cat("  Frames:", length(heatmap_plots), "\n")
+  cat("  Duration:", length(heatmap_plots) * 0.5, "seconds\n")
+}
 
 # =============================================================================
 # SECTION 9: ANALYZE AND VISUALIZE RESULTS
@@ -1173,9 +1600,11 @@ travel_by_school <- map_dfr(1:n_schools, function(i) {
   tibble(
     school_id = i,
     total_away_games = sum(away_games_info$games),
-    bus_games = sum(away_games_info$games[away_games_info$travel_class == "B"]),
+    bus_games = sum(away_games_info$games[
+      away_games_info$travel_class == "Bus"
+    ]),
     plane_games = sum(away_games_info$games[
-      away_games_info$travel_class == "P"
+      away_games_info$travel_class == "Fly"
     ]),
     total_travel_hours = sum(
       away_games_info$travel_time * away_games_info$games
@@ -1368,8 +1797,8 @@ ggplot() +
     fontface = "bold"
   ) +
   scale_color_manual(
-    values = c("B" = den_cols("granvilledarkblue"), "P" = den_cols("red")),
-    labels = c("B" = "Bus", "P" = "Plane"),
+    values = c("Bus" = den_cols("granvilledarkblue"), "Fly" = den_cols("red")),
+    labels = c("Bus" = "Bus", "Fly" = "Plane"),
     name = "Travel Mode"
   ) +
   scale_shape_manual(
@@ -1554,8 +1983,8 @@ plot_school_schedule_map <- function(
       name = "Game Type"
     ) +
     scale_linetype_manual(
-      values = c("B" = "solid", "P" = "dashed"),
-      labels = c("B" = "Bus", "P" = "Plane"),
+      values = c("Bus" = "solid", "Fly" = "dashed"),
+      labels = c("Bus" = "Bus", "Fly" = "Plane"),
       name = "Travel Mode"
     ) +
     labs(
@@ -1778,10 +2207,13 @@ geographic_analysis <- map_dfr(1:n_schools, function(i) {
     summarise(
       avg_distance = mean(distance_miles),
       median_distance = median(distance_miles),
-      pct_plane_required = mean(travel_class == "P") * 100,
-      n_bus_options = sum(travel_class == "B"),
-      n_plane_options = sum(travel_class == "P"),
-      avg_bus_travel_time = mean(travel_time[travel_class == "B"], na.rm = TRUE)
+      pct_plane_required = mean(travel_class == "Fly") * 100,
+      n_bus_options = sum(travel_class == "Bus"),
+      n_plane_options = sum(travel_class == "Fly"),
+      avg_bus_travel_time = mean(
+        travel_time[travel_class == "Bus"],
+        na.rm = TRUE
+      )
     )
 
   tibble(
@@ -2084,8 +2516,8 @@ create_weekly_schedule <- function(schedule, schools_df, school_pairs_df) {
       # Travel mode description
       travel_mode = case_when(
         location == "home" ~ "home",
-        travel_class == "B" ~ "bus",
-        travel_class == "P" ~ "plane",
+        travel_class == "Bus" ~ "bus",
+        travel_class == "Fly" ~ "plane",
         TRUE ~ "unknown"
       )
     )
@@ -2230,7 +2662,7 @@ schedule_df <- final_schedule |>
   )
 
 
-gg <- ggplot(
+gg_sched_heatmap <- ggplot(
   schedule_df,
   aes(x = home_school, y = away_school, fill = factor(games))
 ) +
@@ -2257,7 +2689,7 @@ gg <- ggplot(
     panel.grid = element_blank()
   ) +
   coord_fixed()
-gg
+gg_sched_heatmap
 
 cat("\n")
 cat("=" |> rep(60) |> paste(collapse = ""), "\n")

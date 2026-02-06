@@ -1,0 +1,33 @@
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Fix for code-tools show/hide all not working with code-copy wrapper
+  const hideAllCode = document.getElementById("quarto-hide-all-code");
+  const showAllCode = document.getElementById("quarto-show-all-code");
+  
+  function toggleAllCode(show) {
+    // Find all details elements with code-fold class
+    const allDetails = document.querySelectorAll("details.code-fold");
+    allDetails.forEach(function(details) {
+      if (show) {
+        details.setAttribute("open", "");
+      } else {
+        details.removeAttribute("open");
+      }
+    });
+  }
+  
+  if (hideAllCode) {
+    hideAllCode.addEventListener("click", function(e) {
+      e.preventDefault();
+      toggleAllCode(false);
+    });
+  }
+  
+  if (showAllCode) {
+    showAllCode.addEventListener("click", function(e) {
+      e.preventDefault();
+      toggleAllCode(true);
+    });
+  }
+});
+</script>

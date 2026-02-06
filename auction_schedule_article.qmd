@@ -11,9 +11,12 @@ format:
     code-summary: "Show code"
     code-tools: true
     embed-resources: true
+    include-after-body: code-toggle-fix.html
   typst:
-    toc: true
+    toc: false
     echo: false
+    fig-width: 7.5
+    fig-height: 5
 execute:
   warning: false
   message: false
@@ -22,24 +25,30 @@ execute:
 
 # Abstract
 
-This article presents an iterative auction-based model for forming collegiate athletic conference schedules. The mechanism treats away games as differentiated goods, categorized by opponent strength match and travel requirements. Schools bid on game types according to their preferences, and a market-clearing process determines the final schedule. The model enforces hard constraints including exact home/away game requirements and pairwise meeting limits, while prices emerge endogenously to reflect relative scarcity and desirability. Analysis of simulation results reveals how geographic isolation creates systematic disadvantages for remote schools, who must spend more tokens to acquire less desirable schedules. The auction framework provides a transparent, preference-respecting approach to the complex combinatorial problem of conference scheduling.
+This article presents an iterative auction-based model for forming collegiate athletic conference schedules. The mechanism treats away games as differentiated goods, categorized by opponent strength match and travel requirements. Schools bid on game types according to their preferences, and a market-clearing process determines the final schedule. The model enforces hard constraints including exact home/away game requirements and pairwise meeting limits, while prices emerge endogenously to reflect relative scarcity and desirability. The prices for game types are established early in the auction while many further iterations are required to optimize the schedule. Analysis of simulation results reveals how geographic isolation creates systematic disadvantages for remote schools, who must spend more tokens to acquire less desirable schedules. The auction framework provides a transparent, preference-respecting approach to the complex combinatorial problem of conference scheduling.
 
 # Introduction
 
-In the last few decades, collegiate athletic conferences have undergone significant realignment driven by financial incentives, media rights considerations, and competitive balance concerns. As conferences expand and contract, the challenge of creating fair and efficient sports schedules has become increasingly complex.  This is a particular problem for Division III conferences, where schools have limited budgets and strong preferences over travel burdens and competitive matchups.  There are fewer small colleges within a tight area of similar competitiveness so schools so existing conferences are less attractive.  
+In the last few decades, collegiate athletic conferences have undergone significant realignment driven by financial incentives, media rights considerations, and competitive balance concerns. This is a particular problem for Division III conferences, where schools have limited travel budgets and and fewer peer competitors. Further, schools in a conference play each other in every sport, while schools have varying levels of strength by sport. Some conferences have made agreements to bring in outside schools to some to some sports but these are ad-hoc arrangements.
 
-A typical Division III conference has ten schools. An alternative structure might allow highly fluid "conference" definitions where many more schools participate.  Opponents could be differnent for each sport and different for each year.  Such a structure would encompass a larger geographic area and allow more flexibility for schools to find appropriate opponents.  However, the scheduling problem becomes much more complex and travel time and cost grows as the number of schools increases.
+A typical Division III conference has ten schools. An alternative structure might allow highly fluid "conference" definitions where many more schools participate. Opponents could be different for each sport and different for each year. Such a structure would encompass a larger geographic area and allow more flexibility for schools to find appropriate opponents. However, the scheduling problem becomes much more complex. Travel time and cost also grow as the number of schools increases.
 
-This article explores an alternative approach: using an iterative auction mechanism to form conference schedules. In this framework, away games are treated as differentiated goods, and schools express their preferences through bidding behavior. The market mechanism then allocates games in a way that respects both preferences and hard constraints.
+This article explores an such an approach: using an iterative auction mechanism to form conference schedules. In this framework, away games are treated as differentiated goods, and schools express their preferences through bidding behavior. The market mechanism then allocates games in a way that respects both preferences and hard constraints. While the literature contains many approaches to athletic schedule optimization, I did not see any specifically suggesting an auction market.
 
 The auction-based approach offers several advantages:
 
-1. **Preference revelation**: Schools' bids reveal their true preferences over different types of games
-2. **Price discovery**: Equilibrium prices emerge that reflect the relative scarcity of desirable game types
-3. **Transparency**: The allocation process is governed by clear rules rather than opaque negotiations
-4. **Flexibility**: The mechanism can accommodate heterogeneous preferences across schools
+1.  **Preference revelation**: Schools' bids reveal their true preferences over different types of games
+2.  **Price discovery**: Equilibrium prices emerge that reflect the relative scarcity of desirable game types
+3.  **Transparency**: The allocation process is governed by clear rules rather than opaque negotiations
+4.  **Flexibility**: The mechanism can accommodate heterogeneous preferences across schools
+
+Notably, the auction does not directly allocate specific opponents. Instead, schools bid on categories of games (e.g., "evenly matched bus games") and the clearing mechanism determines which specific opponents they receive based on geographic compatibility and mutual availability.
 
 We implement and simulate this mechanism for a 20-school conference where each school plays 12 games per season (6 home, 6 away). The simulation demonstrates how the auction produces feasible schedules while generating meaningful price signals about game type desirability.
+
+This paper is written as an Quarto embedded code notebook, so all the code necessary to reproduce and critique the results is visible. I believe this is the future of academic publishing. Quarto publishing, the Positron IDE, the R language were used. While I am an experienced R coder, Claude Opus 4.5 wrote most of the code. "The programming language of the future is English."
+
+DISCLAIMER: This is a "toy" model, created by a data science hobbyist without domain expertise. There may  be errors. I share this in hopes it might inspire some discussion around the future of athletic conferences and provide ideas for student data science explorations.
 
 # Model Description
 
@@ -47,8 +56,8 @@ We implement and simulate this mechanism for a 20-school conference where each s
 
 The model considers a set of $N = 20$ schools that form an athletic conference. Each school must play exactly $G = 12$ games per season, split evenly between home and away:
 
-- Home games: $H = 6$
-- Away games: $A = 6$
+-   Home games: $H = 6$
+-   Away games: $A = 6$
 
 Each school begins the season with a budget of $B_0 = 100$ tokens, used to bid on away games.
 
@@ -56,9 +65,9 @@ Each school begins the season with a budget of $B_0 = 100$ tokens, used to bid o
 
 Each school $i$ is assigned a discrete strength score $s_i \in \{1, 2, 3\}$:
 
-- $s_i = 1$: Weak
-- $s_i = 2$: Moderate  
-- $s_i = 3$: Strong
+-   $s_i = 1$: Weak
+-   $s_i = 2$: Moderate\
+-   $s_i = 3$: Strong
 
 The strength match between two schools is defined by the absolute difference in their strength scores:
 
@@ -76,19 +85,19 @@ Schools prefer evenly matched opponents (band 3) over mismatched opponents (band
 
 Each school has a geographic location characterized by latitude and longitude coordinates. For each ordered pair of schools $(i, j)$, travel requirements are determined by:
 
-- **Distance**: Haversine distance in miles between school locations
-- **Bus travel time**: $T_{ij}^{bus} = \text{distance}_{ij} / 60$ hours
-- **Travel class** $\tau_{ij}$:
-  - $B$ (bus) if $T_{ij}^{bus} \leq 5$ hours
-  - $P$ (plane) if $T_{ij}^{bus} > 5$ hours
+-   **Distance**: Haversine distance in miles between school locations
+-   **Bus travel time**: $T_{ij}^{bus} = \text{distance}_{ij} / 60$ hours
+-   **Travel class** $\tau_{ij}$:
+    -   $B$ (bus) if $T_{ij}^{bus} \leq 5$ hours
+    -   $P$ (plane) if $T_{ij}^{bus} > 5$ hours
 
 Travel costs are fixed rates:
 
-| Travel Mode | Cost |
-|-------------|------|
-| Home | \$0 |
-| Bus | \$1,500 |
-| Plane | \$7,500 |
+| Travel Mode | Cost    |
+|-------------|---------|
+| Home        | \$0     |
+| Bus         | \$1,500 |
+| Plane       | \$7,500 |
 
 Plane travel time is treated as constant at 5 hours regardless of distance.
 
@@ -104,9 +113,9 @@ Each ordered away match $(i, j)$ belongs to exactly one game type determined by 
 
 Schools express preferences over game types through disutilities $v_{i,k} \leq 0$. More negative values indicate less desirable game types. Disutility captures:
 
-- Strength band preference (evenly matched preferred)
-- Travel time burden
-- Travel cost burden
+-   Strength band preference (evenly matched preferred)
+-   Travel time burden
+-   Travel cost burden
 
 To convert disutilities to willingness-to-pay (value):
 
@@ -118,30 +127,25 @@ This ensures the most-preferred game type has the highest value and the least-pr
 
 The final schedule must satisfy:
 
-**(a) Total games per school:**
-$$\sum_{j \neq i} x_{ij} + \sum_{j \neq i} x_{ji} = G \quad \forall i$$
+**(a) Total games per school:** $$\sum_{j \neq i} x_{ij} + \sum_{j \neq i} x_{ji} = G \quad \forall i$$
 
-**(b) Exact home/away split:**
-$$\sum_{j \neq i} x_{ji} = H \quad \forall i \quad \text{(home games)}$$
-$$\sum_{j \neq i} x_{ij} = A \quad \forall i \quad \text{(away games)}$$
+**(b) Exact home/away split:** $$\sum_{j \neq i} x_{ji} = H \quad \forall i \quad \text{(home games)}$$ $$\sum_{j \neq i} x_{ij} = A \quad \forall i \quad \text{(away games)}$$
 
-**(c) Pairwise meeting cap:**
-$$x_{ij} + x_{ji} \leq 1 \quad \forall i < j$$
+**(c) Pairwise meeting cap:** $$x_{ij} + x_{ji} \leq 1 \quad \forall i < j$$
 
 The constraint above prefers single meetings between any pair of schools. However, if a feasible schedule cannot be constructed with all single matchups, the algorithm relaxes this constraint to allow teams to play each other up to two times (one home, one away).
 
-**(d) Binary decision variables:**
-$$x_{ij} \in \{0, 1\}$$
+**(d) Binary decision variables:** $$x_{ij} \in \{0, 1\}$$
 
 ## Iterative Auction Process
 
 The auction proceeds iteratively:
 
-1. **Demand determination**: Each school determines integer demand for each game type given current prices and remaining budget
-2. **Clearing problem**: An LP solver finds the value-maximizing allocation respecting feasibility and demand constraints
-3. **Price update**: Prices increase for game types with excess demand
-4. **Budget update**: Schools pay for allocated games at current prices
-5. **Schedule update**: Cumulative schedule matrix is updated
+1.  **Demand determination**: Each school determines integer demand for each game type given current prices and remaining budget
+2.  **Clearing problem**: An LP solver finds the value-maximizing allocation respecting feasibility and demand constraints
+3.  **Price update**: Prices increase for game types with excess demand
+4.  **Budget update**: Schools pay for allocated games at current prices
+5.  **Schedule update**: Cumulative schedule matrix is updated
 
 The process terminates when all schools have complete schedules or a maximum iteration limit is reached.
 
@@ -149,9 +153,9 @@ The process terminates when all schools have complete schedules or a maximum ite
 
 From a school's perspective, the auction unfolds as follows. At the start of each round, the school reviews the current prices for each of the six game types and its remaining token budget. The athletic director must decide: how many games of each type do we want at these prices?
 
-Consider a typical school, "Overthinkion."" Their ideal schedule would include mostly evenly-matched bus games—nearby opponents of similar strength. But if prices for these premium games have risen to 15 tokens each while mismatched plane games remain at 2 tokens, the school faces a trade-off. Spending heavily on preferred games leaves fewer tokens for later rounds when competition for remaining slots intensifies.
+Consider a typical school, "Overthinkon."" Their ideal schedule would include mostly evenly-matched bus games—nearby opponents of similar strength. But if prices for these premium games have risen to 15 tokens each while mismatched plane games remain at 2 tokens, the school faces a trade-off. Spending heavily on preferred games leaves fewer tokens for later rounds when competition for remaining slots intensifies.
 
-At the same time, a nearby evenly matched opponent which is very desirable for Overthinkion will be seen by another school as a mismatched long-distance game and will not want to pay much for it.
+At the same time, a nearby evenly matched opponent which is very desirable for Overthinkon will be seen by another school as a mismatched long-distance game and will not want to pay much for it.
 
 Schools cannot directly bid on specific opponents. Instead, they express demand for *categories* of games. If Overthinkon requests 3 evenly-matched bus games, the clearing mechanism determines which specific opponents they receive based on geographic compatibility and mutual availability. A school might request games against strong nearby teams but end up matched with whoever remains feasible given everyone else's requests.
 
@@ -159,7 +163,9 @@ This indirect allocation creates strategic uncertainty. Schools with many nearby
 
 # Auction Simulation
 
-```{r setup}
+Now we will implement and simulate the auction mechanism described above. The code is organized into sections corresponding to the model components.  Code visibility can be toggled in the interactive version of this article.
+
+```{r}
 #| label: setup
 #| code-summary: "Load required libraries"
 
@@ -170,6 +176,7 @@ if (!require(denisonbrand, quietly = TRUE)) {
 }
 library(lpSolve)
 library(maps)
+library(leaflet)
 denisonbrand::load_fonts()
 
 # Set seed for reproducibility
@@ -178,9 +185,9 @@ set.seed(1234)
 
 ## Section 1: Initialize Season Parameters
 
-This section establishes the fundamental parameters that govern the auction simulation, including the number of schools, games per season, and budget allocations.
+This section establishes the fundamental parameters that govern the auction simulation, including the number of schools, games per season, and budget allocations.  The code is visible in the interactive version of this article.
 
-```{r parameters}
+```{r}
 #| label: season-parameters
 #| code-summary: "Define season parameters"
 
@@ -209,9 +216,10 @@ The conference consists of `r n_schools` schools, each playing `r total_games` g
 
 ## Section 2: Create Schools and Geographic Locations
 
-Schools are created with randomly assigned strength scores and geographic locations within a region approximating the eastern United States.
+Schools are created with randomly assigned strength scores and random geographic locations within a region approximating the eastern United States.  The names are fictional.
 
-```{r schools}
+
+```{r}
 #| label: create-schools
 #| code-summary: "Generate schools with strengths and locations"
 
@@ -279,64 +287,125 @@ schools <- tibble(
   arrange(desc(strength))
 ```
 
-```{r location-map}
+```{r}
 #| label: fig-school-locations-map
 #| fig-cap: "Map of conference school locations with state boundaries"
-#| code-summary: "Create static map with state boundaries"
+#| code-summary: "Create map of school locations"
 
-# Get US state boundaries for eastern states
+# Get US state boundaries for eastern states (needed for static map)
 states_map <- map_data("state") |>
   filter(long >= -92 & long <= -66)
 
-ggplot() +
-  geom_polygon(
-    data = states_map,
-    aes(x = long, y = lat, group = group),
-    fill = "white",
-    color = "gray70",
-    linewidth = 0.3
-  ) +
-  geom_point(
-    data = schools,
-    aes(x = lon, y = lat, color = as.factor(strength)),
-    size = 4
-  ) +
-  geom_text(
-    data = schools,
-    aes(x = lon, y = lat, label = school_name),
-    hjust = -0.1,
-    vjust = 0.5,
-    size = 3
-  ) +
-  scale_color_den(
-    palette = "secondarydark",
-    name = "Strength",
-    labels = c("1 (Weak)", "2 (Moderate)", "3 (Strong)")
-  ) +
-  labs(
-    title = "School Locations",
-    subtitle = "Geographic distribution of conference schools in auction",
-    x = NULL,
-    y = NULL
-  ) +
-  theme_den() +
-  theme(
-    panel.grid.major = element_line(color = "gray90"),
-    panel.grid.minor = element_blank(),
-    axis.text = element_blank(),
-    axis.ticks = element_blank(),
-    panel.background = element_rect(fill = "lightblue")
-  ) +
-  coord_fixed(ratio = 1.3, xlim = c(-92, -68), ylim = c(30, 47))
+# Check output format
+is_html_output <- knitr::is_html_output()
+
+if (is_html_output) {
+  # Define color palette for strength levels (use actual hex colors)
+  strength_color_values <- c("#9ecae1", "#3182bd", "#08519c")
+
+  # Define sizes for strength levels (larger = stronger)
+  strength_size_values <- c(6, 10, 14)
+
+  # Pre-compute colors and sizes for each school (use numeric indexing)
+  schools <- schools |>
+    mutate(
+      marker_color = strength_color_values[strength],
+      marker_size = strength_size_values[strength]
+    )
+
+  # Create leaflet map with permanent labels
+  leaflet(schools) |>
+    addProviderTiles(providers$CartoDB.Positron) |>
+    setView(lng = -80, lat = 38.5, zoom = 5) |>
+    addCircleMarkers(
+      lng = ~lon,
+      lat = ~lat,
+      radius = ~marker_size,
+      color = ~marker_color,
+      fillColor = ~marker_color,
+      fillOpacity = 0.7,
+      stroke = TRUE,
+      weight = 2,
+      popup = ~ paste0(
+        "<b>",
+        school_name,
+        "</b><br>",
+        "Strength: ",
+        strength,
+        " (",
+        case_when(
+          strength == 1 ~ "Weak",
+          strength == 2 ~ "Moderate",
+          strength == 3 ~ "Strong"
+        ),
+        ")"
+      ),
+      label = ~school_name,
+      labelOptions = labelOptions(
+        noHide = TRUE,
+        direction = "right",
+        textOnly = TRUE,
+        style = list("font-size" = "10px")
+      )
+    ) |>
+    addLegend(
+      position = "bottomright",
+      colors = strength_color_values,
+      labels = c("1 (Weak)", "2 (Moderate)", "3 (Strong)"),
+      title = "Strength"
+    )
+} else {
+  # Static ggplot map for typst/PDF
+  ggplot() +
+    geom_polygon(
+      data = states_map,
+      aes(x = long, y = lat, group = group),
+      fill = "white",
+      color = "gray70",
+      linewidth = 0.3
+    ) +
+    geom_point(
+      data = schools,
+      aes(x = lon, y = lat, color = as.factor(strength)),
+      size = 4
+    ) +
+    geom_text(
+      data = schools,
+      aes(x = lon, y = lat, label = school_name),
+      hjust = -0.1,
+      vjust = 0.5,
+      size = 3
+    ) +
+    scale_color_den(
+      palette = "secondarydark",
+      name = "Strength",
+      labels = c("1 (Weak)", "2 (Moderate)", "3 (Strong)")
+    ) +
+    labs(
+      title = "School Locations",
+      subtitle = "Geographic distribution of conference schools in auction",
+      x = NULL,
+      y = NULL
+    ) +
+    theme_den() +
+    theme(
+      panel.grid.major = element_line(color = "gray90"),
+      panel.grid.minor = element_blank(),
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      panel.background = element_rect(fill = "lightblue")
+    ) +
+    coord_fixed(ratio = 1.3, xlim = c(-92, -68), ylim = c(30, 47))
+}
 ```
 
 @fig-school-locations-map shows the geographic distribution of conference schools with state boundaries for context.
 
 ## Section 3: Define Game Types and Preferences
 
-Schools have preferences over different types of away games. Game types are defined by the combination of opponent strength match and travel requirements.
+Schools have preferences over different types of away games. Game types are defined by the combination of opponent strength match and travel requirements.  In practice schools would reveal their preferernces through the bidding process.  Here we assign somewhat realistic preferences to simulate the auction. Each school's preferences are generated with some random variation around base disutility values. 
 
-```{r game-types}
+```{r}
 #| label: define-game-types
 #| code-summary: "Create game type definitions"
 
@@ -360,7 +429,7 @@ game_types <- expand_grid(
   )
 ```
 
-```{r preferences}
+```{r}
 #| label: generate-preferences
 #| code-summary: "Generate school preferences"
 
@@ -405,7 +474,7 @@ avg_preferences <- school_preferences |>
   )
 ```
 
-```{r pref-viz}
+```{r}
 #| label: fig-preferences
 #| fig-cap: "Average school preferences by game type"
 #| code-summary: "Visualize preference structure"
@@ -431,9 +500,9 @@ Schools strongly prefer evenly matched bus games (low disutility) and dislike mi
 
 ## Section 4: Create School Pairs with Travel Information
 
-This section computes the travel requirements between all pairs of schools, determining which games require plane travel versus bus travel.
+This section computes the travel requirements between all pairs of schools, determining which games require plane travel versus bus travel.  If the bus ride is longer than 5 hours, the game is classified as a plane game with a fixed travel time of 5 hours.  The cost for a bus trip is $1,500 while the cost for a plane trip is $7,500.  This is not intened be an accurate model of travel costs, just a simple way to differentiate travel types.  Likewise, we use the straight-line distance rather than actual driving distance, which would not be realistic if we were using acutal schools.
 
-```{r school-pairs}
+```{r}
 #| label: create-school-pairs
 #| code-summary: "Calculate travel between all school pairs"
 
@@ -505,7 +574,7 @@ school_pairs <- expand_grid(
   left_join(game_types, by = c("strength_match", "travel_class"))
 ```
 
-```{r travel-viz}
+```{r}
 #| label: fig-travel-distribution
 #| fig-cap: "Distribution of travel times between schools"
 #| code-summary: "Visualize travel time distribution"
@@ -529,7 +598,7 @@ ggplot(school_pairs, aes(x = travel_time, fill = travel_class)) +
   theme_den()
 ```
 
-```{r game-type-dist}
+```{r}
 #| label: fig-game-type-distribution
 #| fig-cap: "Distribution of away game types"
 #| code-summary: "Visualize game type distribution"
@@ -551,8 +620,9 @@ ggplot(school_pairs, aes(x = type_label, fill = strength_match)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-Some schools are more geographically isolated than others. The table below quantifies each school's isolation score, which reflects the average distance to its opponents weighted by match quality.    Inevitably, schools located far from the conference core must travel longer distances to reach well-matched opponents.
-```{r geographic-isolation-table}
+Some schools are more geographically isolated than others. The table below quantifies each school's isolation score, which reflects the average distance to its opponents weighted by match quality. Inevitably, schools located far from the conference core must travel longer distances to reach well-matched opponents.
+
+```{r}
 #| label: tbl-geographic-isolation
 #| tbl-cap: "Geographic isolation scores by school"
 #| code-summary: "Calculate isolation weighted by opponent match quality"
@@ -602,7 +672,7 @@ The isolation score weights distance by opponent match quality—schools whose e
 
 The auction requires several helper functions for demand calculation, feasibility checking, and schedule updates.
 
-```{r helper-functions}
+```{r}
 #| label: helper-functions
 #| code-summary: "Define auction helper functions"
 
@@ -672,7 +742,7 @@ calculate_demand <- function(
 
 The heart of the auction is the clearing problem, solved as an integer linear program to find the value-maximizing allocation.
 
-```{r clearing-lp}
+```{r}
 #| label: clearing-lp
 #| code-summary: "Define LP clearing solver"
 
@@ -833,7 +903,7 @@ solve_clearing_problem <- function(
 
 With all components in place, we execute the iterative auction to produce the conference schedule.
 
-```{r run-auction}
+```{r}
 #| label: run-auction
 #| code-summary: "Execute the auction process"
 
@@ -995,48 +1065,66 @@ run_auction <- function(
   game_counts <- count_school_games(current_schedule)
   max_attempts <- 100
   attempt <- 0
-  
-  while (!all(game_counts$total_games == total_games) && attempt < max_attempts) {
+
+  while (
+    !all(game_counts$total_games == total_games) && attempt < max_attempts
+  ) {
     attempt <- attempt + 1
     made_progress <- FALSE
-    
+
     # Find schools that need more games
     schools_needing_away <- which(game_counts$away_games < exact_away_games)
     schools_needing_home <- which(game_counts$home_games < exact_home_games)
-    
+
     # Try to match schools needing away games with schools needing home games
     for (i in schools_needing_away) {
-      if (game_counts$away_games[i] >= exact_away_games) next
-      
+      if (game_counts$away_games[i] >= exact_away_games) {
+        next
+      }
+
       for (j in schools_needing_home) {
-        if (i == j) next
-        if (game_counts$home_games[j] >= exact_home_games) next
-        
+        if (i == j) {
+          next
+        }
+        if (game_counts$home_games[j] >= exact_home_games) {
+          next
+        }
+
         # Check pairwise constraint (allow up to 2 meetings if necessary)
         meetings <- current_schedule[i, j] + current_schedule[j, i]
-        if (meetings >= 2) next
-        
+        if (meetings >= 2) {
+          next
+        }
+
         # Schedule the game
         current_schedule[i, j] <- current_schedule[i, j] + 1
         game_counts <- count_school_games(current_schedule)
         made_progress <- TRUE
-        
+
         if (game_counts$away_games[i] >= exact_away_games) break
       }
     }
-    
+
     if (!made_progress) {
       # If no progress with standard matching, allow any valid pairing
       for (i in 1:n_schools) {
-        if (game_counts$away_games[i] >= exact_away_games) next
-        
+        if (game_counts$away_games[i] >= exact_away_games) {
+          next
+        }
+
         for (j in 1:n_schools) {
-          if (i == j) next
-          if (game_counts$home_games[j] >= exact_home_games) next
-          
+          if (i == j) {
+            next
+          }
+          if (game_counts$home_games[j] >= exact_home_games) {
+            next
+          }
+
           meetings <- current_schedule[i, j] + current_schedule[j, i]
-          if (meetings >= 2) next
-          
+          if (meetings >= 2) {
+            next
+          }
+
           current_schedule[i, j] <- current_schedule[i, j] + 1
           game_counts <- count_school_games(current_schedule)
           made_progress <- TRUE
@@ -1045,47 +1133,64 @@ run_auction <- function(
         if (made_progress) break
       }
     }
-    
+
     if (!made_progress) break
   }
-  
+
   # Swap-based repair for remaining imbalances
   # When greedy fill can't make progress because all other schools are at capacity,
 
   # we swap games: cancel X @ Y, add X @ needing_home, add needing_away @ Y
   game_counts <- count_school_games(current_schedule)
   pairwise <- current_schedule + t(current_schedule)
-  
+
   max_swap_attempts <- 50
   swap_attempt <- 0
-  
-  while (!all(game_counts$total_games == total_games) && swap_attempt < max_swap_attempts) {
+
+  while (
+    !all(game_counts$total_games == total_games) &&
+      swap_attempt < max_swap_attempts
+  ) {
     swap_attempt <- swap_attempt + 1
     made_progress <- FALSE
-    
+
     schools_needing_home <- which(game_counts$home_games < exact_home_games)
     schools_needing_away <- which(game_counts$away_games < exact_away_games)
-    
-    if (length(schools_needing_home) == 0 || length(schools_needing_away) == 0) break
-    
+
+    if (
+      length(schools_needing_home) == 0 || length(schools_needing_away) == 0
+    ) {
+      break
+    }
+
     need_home <- schools_needing_home[1]
     need_away <- schools_needing_away[1]
-    
+
     # Find a swap: X @ Y where X can visit need_home and need_away can visit Y
     for (x in 1:n_schools) {
-      if (x == need_home || x == need_away) next
-      if (pairwise[x, need_home] >= 2) next  # X can't play need_home anymore
-      
+      if (x == need_home || x == need_away) {
+        next
+      }
+      if (pairwise[x, need_home] >= 2) {
+        next
+      } # X can't play need_home anymore
+
       for (y in 1:n_schools) {
-        if (y == x || y == need_home || y == need_away) next
-        if (current_schedule[x, y] == 0) next  # No game to cancel
-        if (pairwise[need_away, y] >= 2) next  # need_away can't play Y anymore
-        
+        if (y == x || y == need_home || y == need_away) {
+          next
+        }
+        if (current_schedule[x, y] == 0) {
+          next
+        } # No game to cancel
+        if (pairwise[need_away, y] >= 2) {
+          next
+        } # need_away can't play Y anymore
+
         # Perform swap
         current_schedule[x, y] <- current_schedule[x, y] - 1
         current_schedule[x, need_home] <- current_schedule[x, need_home] + 1
         current_schedule[need_away, y] <- current_schedule[need_away, y] + 1
-        
+
         game_counts <- count_school_games(current_schedule)
         pairwise <- current_schedule + t(current_schedule)
         made_progress <- TRUE
@@ -1093,7 +1198,7 @@ run_auction <- function(
       }
       if (made_progress) break
     }
-    
+
     if (!made_progress) break
   }
 
@@ -1114,6 +1219,10 @@ auction_results <- run_auction(
 final_schedule <- auction_results$schedule
 ```
 
+::: {.content-visible when-format="html"}
+![Schedule Building Animation](schedule_animation.gif)
+:::
+
 The auction completed in `r auction_results$iterations_used` iterations, producing a complete schedule for all `r n_schools` schools.
 
 # Results
@@ -1122,7 +1231,7 @@ The auction completed in `r auction_results$iterations_used` iterations, produci
 
 We first verify that the produced schedule satisfies all feasibility constraints.
 
-```{r verify}
+```{r}
 #| label: verify-schedule
 #| code-summary: "Verify constraint satisfaction"
 
@@ -1136,7 +1245,7 @@ game_summary <- count_school_games(final_schedule) |>
 pairwise_meetings <- final_schedule + t(final_schedule)
 ```
 
-```{r constraints-table}
+```{r}
 #| label: tbl-constraints
 #| tbl-cap: "Schedule constraint verification"
 #| code-summary: "Display constraint summary"
@@ -1168,9 +1277,9 @@ knitr::kable(constraint_summary)
 
 ## Final Prices
 
-The auction produces prices for each game type that reflect relative demand and scarcity.
+The auction produces prices for each game type that reflect relative demand and scarcity. Note that prices reach their terminal values quickly, often within the first 20 iterations. Beyond that, prices stabilize as schools exhaust their budgets.
 
-```{r price-evolution}
+```{r}
 #| label: fig-price-evolution
 #| fig-cap: "Price evolution during the auction"
 #| code-summary: "Visualize price dynamics"
@@ -1199,7 +1308,7 @@ if (nrow(auction_results$iteration_log) > 0) {
 
 Geographic location significantly impacts school outcomes in terms of travel burden.
 
-```{r travel-analysis}
+```{r}
 #| label: fig-travel-cost
 #| fig-cap: "Total travel cost by school"
 #| code-summary: "Calculate travel statistics and visualize"
@@ -1230,7 +1339,9 @@ travel_by_school <- map_dfr(1:n_schools, function(i) {
   tibble(
     school_id = i,
     total_away_games = sum(away_games_info$games),
-    bus_games = sum(away_games_info$games[away_games_info$travel_class == "Bus"]),
+    bus_games = sum(away_games_info$games[
+      away_games_info$travel_class == "Bus"
+    ]),
     plane_games = sum(away_games_info$games[
       away_games_info$travel_class == "Fly"
     ]),
@@ -1313,7 +1424,7 @@ ggplot(
   theme_den()
 ```
 
-```{r travel-hours-results}
+```{r}
 #| label: fig-travel-hours
 #| fig-cap: "Total travel hours by school"
 #| code-summary: "Visualize travel time burden"
@@ -1346,7 +1457,7 @@ ggplot(
 
 We examine how token spending relates to schedule quality (total disutility).
 
-```{r budget-analysis}
+```{r}
 #| label: fig-spent-vs-disutility
 #| fig-cap: "Tokens spent versus total disutility"
 #| code-summary: "Calculate budget metrics and visualize"
@@ -1380,7 +1491,7 @@ ggplot(
 
 A key finding is that geographic isolation systematically disadvantages schools.
 
-```{r geographic-analysis}
+```{r}
 #| label: fig-geographic-isolation
 #| fig-cap: "Geographic isolation versus schedule quality"
 #| code-summary: "Analyze geographic effects and visualize"
@@ -1450,7 +1561,7 @@ ggplot(
 
 ## Conference Schedule Map
 
-```{r schedule-map}
+```{r}
 #| label: fig-schedule-map
 #| fig-cap: "Conference schedule map showing all matchups"
 #| code-summary: "Create schedule visualization"
@@ -1528,11 +1639,13 @@ ggplot() +
   coord_fixed(ratio = 1.2)
 ```
 
-```{r single-school-map}
+```{r}
 #| label: fig-single-school-schedule
 #| fig-cap: "Example schedule for a single school"
 #| code-summary: "Visualize one school's schedule"
 
+# Check output format
+is_html_output <- knitr::is_html_output()
 # Select a school to highlight (choose school with most varied schedule)
 highlight_school_id <- travel_by_school |>
   arrange(desc(plane_games)) |>
@@ -1566,109 +1679,214 @@ school_opponents <- tibble(
     )
   )
 
-# Create connections from highlight school to opponents
-school_connections <- school_opponents |>
-  mutate(
-    x_start = highlight_school$lon,
-    y_start = highlight_school$lat,
-    x_end = lon,
-    y_end = lat
-  )
+# Define colors for game types
+game_type_colors <- c(
+  "Away" = "red",
+  "Home" = "gray",
+  "Home & Away" = "purple"
+)
 
-ggplot() +
-  geom_polygon(
-    data = states_map,
-    aes(x = long, y = lat, group = group),
-    fill = "white",
-    color = "gray70",
-    linewidth = 0.3
-  ) +
-  geom_segment(
-    data = school_connections,
-    aes(
-      x = x_start,
-      y = y_start,
-      xend = x_end,
-      yend = y_end,
-      color = game_type,
-      linetype = travel_class
-    ),
-    linewidth = 1.2,
-    alpha = 0.8
-  ) +
-  geom_point(
-    data = schools |> filter(school_id != highlight_school_id),
-    aes(x = lon, y = lat),
-    size = 3,
-    color = "gray50"
-  ) +
-  geom_point(
-    data = school_opponents,
-    aes(x = lon, y = lat, shape = game_type),
-    size = 4,
-    fill = den_cols("granvilledarkblue"),
-    color = "black"
-  ) +
-  geom_point(
-    data = highlight_school,
-    aes(x = lon, y = lat),
-    size = 6,
-    shape = 18,
-    color = den_cols("red")
-  ) +
-  geom_text(
-    data = school_opponents,
-    aes(x = lon, y = lat, label = school_name),
-    size = 2.5,
-    hjust = -0.1,
-    vjust = 0.5
-  ) +
-  geom_label(
-    data = highlight_school,
-    aes(x = lon, y = lat, label = school_name),
-    size = 3,
-    fontface = "bold",
-    fill = den_cols("red"),
-    color = "white",
-    hjust = -0.1
-  ) +
-  scale_color_manual(
-    values = c("Away" = "red", "Home" = "gray70", "Home & Away" = "red"),
-    name = "Game Type"
-  ) +
-  scale_linetype_manual(
-    values = c("Bus" = "solid", "Fly" = "dashed"),
-    labels = c("Bus" = "Bus", "Fly" = "Plane"),
-    name = "Travel Mode"
-  ) +
-  scale_shape_manual(
-    values = c("Away" = 24, "Home" = 25, "Home & Away" = 23),
-    name = "Game Type"
-  ) +
-  labs(
-    title = paste(highlight_school$school_name, "Schedule"),
-    subtitle = paste0(
-      sum(school_opponents$away_game),
-      " away games, ",
-      sum(school_opponents$home_game),
-      " home games"
-    ),
-    x = NULL,
-    y = NULL
-  ) +
-  theme_den() +
-  theme(
-    panel.grid.major = element_line(color = "gray90"),
-    panel.grid.minor = element_blank(),
-    axis.text = element_blank(),
-    axis.ticks = element_blank(),
-    panel.background = element_rect(fill = "lightblue"),
-    legend.position = "right"
-  ) +
-  coord_fixed(ratio = 1.3, xlim = c(-92, -68), ylim = c(30, 47))
+if (is_html_output) {
+  # Create leaflet map
+  map <- leaflet() |>
+    addProviderTiles(providers$CartoDB.Positron) |>
+    setView(
+      lng = mean(c(highlight_school$lon, school_opponents$lon)),
+      lat = mean(c(highlight_school$lat, school_opponents$lat)),
+      zoom = 5
+    )
+
+  # Add lines connecting highlight school to opponents
+  for (i in seq_len(nrow(school_opponents))) {
+    opp <- school_opponents[i, ]
+    line_color <- if (opp$game_type == "Away") {
+      "red"
+    } else if (opp$game_type == "Home") {
+      "gray"
+    } else {
+      "purple"
+    }
+    dash_pattern <- if (!is.na(opp$travel_class) && opp$travel_class == "Fly") {
+      "5, 10"
+    } else {
+      NULL
+    }
+
+    map <- map |>
+      addPolylines(
+        lng = c(highlight_school$lon, opp$lon),
+        lat = c(highlight_school$lat, opp$lat),
+        color = line_color,
+        weight = 2,
+        opacity = 0.7,
+        dashArray = dash_pattern
+      )
+  }
+
+  # Add opponent markers with permanent labels
+  map <- map |>
+    addCircleMarkers(
+      data = school_opponents,
+      lng = ~lon,
+      lat = ~lat,
+      radius = 6,
+      color = ~ game_type_colors[game_type],
+      fillColor = "blue",
+      fillOpacity = 0.9,
+      stroke = TRUE,
+      weight = 3,
+      popup = ~ paste0(
+        "<b>",
+        school_name,
+        "</b><br>",
+        "Game Type: ",
+        game_type,
+        "<br>",
+        "Strength: ",
+        strength,
+        ifelse(!is.na(travel_class), paste0("<br>Travel: ", travel_class), "")
+      ),
+      label = ~school_name,
+      labelOptions = labelOptions(
+        noHide = TRUE,
+        direction = "right",
+        textOnly = TRUE,
+        style = list("font-size" = "10px")
+      )
+    )
+
+  # Add highlight school marker (larger, distinct)
+  map <- map |>
+    addMarkers(
+      data = highlight_school,
+      lng = ~lon,
+      lat = ~lat,
+      popup = ~ paste0("<b>", school_name, "</b><br>(Featured School)"),
+      label = ~school_name,
+      labelOptions = labelOptions(
+        noHide = TRUE,
+        direction = "left",
+        textOnly = FALSE,
+        style = list("font-weight" = "bold", "font-size" = "12px")
+      )
+    ) |>
+    addLegend(
+      position = "bottomright",
+      colors = c("red", "gray", "purple"),
+      labels = c("Away", "Home", "Home & Away"),
+      title = "Game Type"
+    ) |>
+    addControl(
+      html = "<div style='background: white; padding: 6px 10px; border-radius: 5px; border: 2px solid rgba(0,0,0,0.2);'>
+        <strong>Travel Mode</strong><br>
+        <span style='display: inline-block; width: 30px; border-top: 2px solid black;'></span> Bus<br>
+        <span style='display: inline-block; width: 30px; border-top: 2px dashed black;'></span> Plane
+      </div>",
+      position = "bottomleft"
+    )
+
+  map
+} else {
+  # Static ggplot map for typst/PDF
+  # Create connections from highlight school to opponents
+  school_connections <- school_opponents |>
+    mutate(
+      x_start = highlight_school$lon,
+      y_start = highlight_school$lat,
+      x_end = lon,
+      y_end = lat
+    )
+
+  ggplot() +
+    geom_polygon(
+      data = states_map,
+      aes(x = long, y = lat, group = group),
+      fill = "white",
+      color = "gray70",
+      linewidth = 0.3
+    ) +
+    geom_segment(
+      data = school_connections,
+      aes(
+        x = x_start,
+        y = y_start,
+        xend = x_end,
+        yend = y_end,
+        color = game_type,
+        linetype = travel_class
+      ),
+      linewidth = 1.2,
+      alpha = 0.8
+    ) +
+    geom_point(
+      data = schools |> filter(school_id != highlight_school_id),
+      aes(x = lon, y = lat),
+      size = 3,
+      color = "gray50"
+    ) +
+    geom_point(
+      data = school_opponents,
+      aes(x = lon, y = lat, shape = game_type),
+      size = 4,
+      fill = den_cols("granvilledarkblue"),
+      color = "black"
+    ) +
+    geom_point(
+      data = highlight_school,
+      aes(x = lon, y = lat),
+      size = 6,
+      shape = 18,
+      color = den_cols("red")
+    ) +
+    geom_text(
+      data = school_opponents,
+      aes(x = lon, y = lat, label = school_name),
+      size = 2.5,
+      hjust = -0.1,
+      vjust = 0.5
+    ) +
+    geom_label(
+      data = highlight_school,
+      aes(x = lon, y = lat, label = school_name),
+      size = 3,
+      fontface = "bold",
+      fill = den_cols("red"),
+      color = "white",
+      hjust = -0.1
+    ) +
+    scale_color_manual(
+      values = c("Away" = "red", "Home" = "gray70", "Home & Away" = "purple"),
+      name = "Game Type"
+    ) +
+    scale_linetype_manual(
+      values = c("Bus" = "solid", "Fly" = "dashed"),
+      labels = c("Bus" = "Bus", "Fly" = "Plane"),
+      name = "Travel Mode"
+    ) +
+    scale_shape_manual(
+      values = c("Away" = 24, "Home" = 25, "Home & Away" = 23),
+      name = "Game Type"
+    ) +
+    labs(
+      title = paste(highlight_school$school_name, "Schedule"),
+      subtitle = "Lines connect to opponents | Dashed lines indicate air travel",
+      x = NULL,
+      y = NULL
+    ) +
+    theme_den() +
+    theme(
+      panel.grid.major = element_line(color = "gray90"),
+      panel.grid.minor = element_blank(),
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      panel.background = element_rect(fill = "lightblue"),
+      legend.position = "right"
+    ) +
+    coord_fixed(ratio = 1.3, xlim = c(-92, -68), ylim = c(30, 47))
+}
 ```
 
-```{r overthinkion-schedule-table}
+```{r}
 #| label: tbl-overthinkion-schedule
 #| tbl-cap: "Overthinkon's complete season schedule"
 #| code-summary: "Create formatted schedule table"
@@ -1813,8 +2031,12 @@ overthinkon_schedule <- weekly_schedule |>
   left_join(
     school_pairs |>
       filter(school_j == overthinkon_id) |>
-      select(school_i, opp_travel_class = travel_class, 
-             opp_distance = distance_miles, opp_travel_time = travel_time),
+      select(
+        school_i,
+        opp_travel_class = travel_class,
+        opp_distance = distance_miles,
+        opp_travel_time = travel_time
+      ),
     by = c("opponent_id" = "school_i")
   ) |>
   mutate(
@@ -1855,8 +2077,10 @@ overthinkon_schedule <- weekly_schedule |>
 
 knitr::kable(overthinkon_schedule)
 ```
-In this particular example, Overthinkon has received a package where all their away games are by plane, resulting in the highest travel cost among all schools.  Let's look at how their utility budget might have resulted in this outcome.
-```{r overthinkon-utility-preferences}
+
+In this particular example, Overthinkon has received a package where all their away games are by plane, resulting in the highest travel cost among all schools. Let's look at how their utility budget might have resulted in this outcome.
+
+```{r}
 #| label: tbl-overthinkon-utility
 #| tbl-cap: "Overthinkon's game type preferences compared to conference average"
 #| code-summary: "Display Overthinkon's disutility budget"
@@ -1896,9 +2120,9 @@ Schools with less aversion to plane travel (less negative disutility for plane g
 
 ## Schedule Heatmap
 
-Schools will not meet the same opponent multiple times in a season unless the schedule cannot be filled otherwise. The schedule heatmap below shows how many times each pair of schools meet during the season.  In this run Snackylios and Figetes meet twice, while all other pairs meet either once or not at all.  The liklihood of multiple meetings depends on the utility budgets and geographic distribution of schools.
+Schools will not meet the same opponent multiple times in a season unless the schedule cannot be filled otherwise. The schedule heatmap below shows how many times each pair of schools meet during the season. In this run Snackylios and Figetes meet twice, while all other pairs meet either once or not at all. The liklihood of multiple meetings depends on the utility budgets and geographic distribution of schools.
 
-```{r heatmap}
+```{r}
 #| label: fig-schedule-heatmap
 #| fig-cap: "Schedule matrix heatmap"
 #| code-summary: "Create schedule heatmap"
@@ -1949,17 +2173,18 @@ ggplot(
 
 This simulation demonstrates that an iterative auction mechanism can successfully produce feasible conference schedules while respecting school preferences and hard constraints. Key findings include:
 
-1. **Successful schedule formation**: The auction consistently produces complete schedules satisfying all constraints (12 games per school, exactly 6 home and 6 away, at most two meetings per pair).
+1.  **Successful schedule formation**: The auction consistently produces complete schedules satisfying all constraints (12 games per school, exactly 6 home and 6 away, at most two meetings per pair).
 
-2. **Meaningful price discovery**: Prices for desirable game types (evenly matched, bus travel) rise during the auction, reflecting genuine scarcity and preferences.
+2.  **Meaningful price discovery**: Prices for desirable game types (evenly matched, bus travel) rise during the auction, reflecting genuine scarcity and preferences.
 
-3. **Geographic disadvantage**: Schools in geographically isolated locations face structural disadvantages. They must acquire more plane games regardless of preference, leading to:
-   - Higher token expenditure
-   - Worse schedule quality (higher total disutility)
-   - This inverse correlation between spending and outcomes reflects the geographic constraints embedded in the game type structure.
+3.  **Geographic disadvantage**: Schools in geographically isolated locations face structural disadvantages. They must acquire more plane games regardless of preference, leading to:
 
-4. **Preference heterogeneity matters**: Schools with different strength profiles have different sets of opponents available for "evenly matched" games, affecting their ability to achieve preferred schedules.
+    -   Higher token expenditure
+    -   Worse schedule quality (higher total disutility)
+    -   This inverse correlation between spending and outcomes reflects the geographic constraints embedded in the game type structure.
+
+4.  **Preference heterogeneity matters**: Schools with different strength profiles have different sets of opponents available for "evenly matched" games, affecting their ability to achieve preferred schedules.
 
 The auction framework provides a transparent, rules-based approach to conference scheduling that could be adapted for real-world applications. Future extensions could incorporate additional constraints such as mandatory rivalries and dollar budgets for travel costs.
 
-The key feature of this model is that auction prices reflect game *types*, not individual matchups. Schools cannot escape their geographic constraints through bidding behavior alone—a school surrounded by distant opponents must acquire plane games regardless of their willingness to pay for bus games.  This structural feature of the mechanism has important equity implications for conference design.
+The key feature of this model is that auction prices reflect game *types*, not individual matchups. Schools cannot escape their geographic constraints through bidding behavior alone—a school surrounded by distant opponents must acquire plane games regardless of their willingness to pay for bus games. This structural feature of the mechanism has important equity implications for conference design.
